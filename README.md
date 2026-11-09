@@ -254,3 +254,7 @@ The files:
 | `tls.py` | Certificates |
 | `worker.py` | The loop |
 | `dashboard.py`, `admin.py`, `templates/` | The web UI |
+
+## Licence
+
+[MIT](LICENSE). Branchwarden is fully open source.
