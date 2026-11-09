@@ -26,6 +26,11 @@ write to GitHub is requesting (or withdrawing) reviewers.
 
 The look follows [Skyfarer](https://github.com/chrisnock-personal/skyfarer).
 
+For an illustrated tour of every feature, see the
+[project overview](https://github.com/chrisnock-personal/project-overviews/blob/main/branchwarden/README.md).
+
+![The Branchwarden overview: summary tiles, a card per repository, the pull requests that need attention, delivery channel health and the scan log](docs/images/hero.png)
+
 ## Quick start
 
 ```bash
