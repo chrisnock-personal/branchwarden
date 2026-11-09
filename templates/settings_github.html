@@ -1,0 +1,152 @@
+{% extends "settings_base.html" %}
+{% block title %}GitHub · Branchwarden{% endblock %}
+{% block heading %}
+<div>
+  <h1>GitHub</h1>
+  <p class="lede">How Branchwarden reaches GitHub, and which accounts and organisations it scans. Use the GitHub App for organisations: it gets webhooks, a bigger API budget and acts as itself. Use a token for a personal account, or where the App isn't installed.</p>
+</div>
+{% endblock %}
+{% block content %}
+<form method="post" action="{{ url_for('admin.github_test') }}">{{ csrf() }}<button class="btn small" type="submit">Test the connections</button></form>
+
+<section class="card pad" id="app" aria-labelledby="app-h">
+  <div class="row-head">
+    <span class="ic" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M8 12h8M12 8v8"/></svg></span>
+    <div class="title"><strong id="app-h">GitHub App</strong>
+      <span>{% if app_info %}{{ app_info.name }} · App ID <span class="mono">{{ app_info.id }}</span>{% elif get('GITHUB_APP_ID') %}App ID <span class="mono">{{ get('GITHUB_APP_ID') }}</span>{% else %}Not set up{% endif %}</span></div>
+    {% if app_error %}<span class="badge bad">Error</span>{% elif app_info and flag('GITHUB_APP_ENABLED') %}<span class="badge good">Connected</span>{% elif app_info %}<span class="badge muted">Off</span>{% else %}<span class="badge muted">Not set up</span>{% endif %}
+  </div>
+  {% if app_error %}<div class="flash bad">GitHub said: {{ app_error }}</div>{% endif %}
+  <form method="post" action="{{ url_for('admin.github_app') }}" style="display: flex; flex-direction: column; gap: 16px">
+    {{ csrf() }}
+    <div class="form-grid">
+      <div class="field">
+        <label for="app-id">App ID</label>
+        <input class="input mono" id="app-id" name="GITHUB_APP_ID" value="{{ get('GITHUB_APP_ID') }}" inputmode="numeric" autocomplete="off">
+      </div>
+      <div class="field" style="justify-content: flex-end">
+        <label class="check"><input type="checkbox" name="GITHUB_APP_ENABLED" value="1" {{ 'checked' if flag('GITHUB_APP_ENABLED') }}> Use the App</label>
+      </div>
+      <div class="field wide">
+        <label for="app-key">Private key</label>
+        {% if stored('GITHUB_APP_PRIVATE_KEY') %}<div class="stored"><span><strong>Stored</strong> · {{ stored('GITHUB_APP_PRIVATE_KEY') }}</span><label class="check" style="min-height: 0"><input type="checkbox" name="remove_key" value="1"> Remove</label></div>{% endif %}
+        <textarea class="input" id="app-key" name="GITHUB_APP_PRIVATE_KEY" rows="4" placeholder="{{ 'Paste a new .pem to replace it' if stored('GITHUB_APP_PRIVATE_KEY') else '-----BEGIN RSA PRIVATE KEY-----' }}" autocomplete="off" spellcheck="false"></textarea>
+        <span class="help">From the App's settings › Private keys › Generate. It's encrypted here and never shown again.</span>
+      </div>
+      <div class="field wide">
+        <label for="hook-secret">Webhook secret</label>
+        {% if stored('GITHUB_WEBHOOK_SECRET') %}<div class="stored"><span><strong>Stored</strong> · {{ stored('GITHUB_WEBHOOK_SECRET') }}{% if last_hook %} · last event {{ last_hook.received_at|ago }} ago ({{ 'verified' if last_hook.status != 401 else 'bad signature' }}){% endif %}</span></div>{% endif %}
+        <input class="input mono" id="hook-secret" name="GITHUB_WEBHOOK_SECRET" autocomplete="off" placeholder="{{ 'Type a new one to replace it' if stored('GITHUB_WEBHOOK_SECRET') else 'At least 20 random characters' }}">
+        <span class="help">Need one? <span class="mono">{{ suggested_secret }}</span> (random, not saved unless you paste it). Put the same value in the App's settings. Events without a valid signature are refused.</span>
+      </div>
+      <div class="field wide">
+        <span class="label">Webhook URL (paste into the App's settings on GitHub)</span>
+        <div class="link-box"><code id="hook-url">{{ webhook_url }}</code><button type="button" class="btn small" data-copy="hook-url">Copy</button></div>
+        <span class="help">GitHub has to reach this address. Subscribe to: Pull request, Pull request review, Check suite, Push, Create, Delete. Without webhooks Branchwarden still polls on schedule.</span>
+      </div>
+    </div>
+    <div class="actions"><p class="hint">App permissions it needs: Pull requests read and write, Contents read, Metadata read, Members read (organisations), Checks read.</p><div class="end"><button type="submit" class="btn primary">Save App settings</button></div></div>
+  </form>
+  {% if installs %}
+  <div class="card panel" style="background: var(--bg)">
+    <div class="scroll"><table style="min-width: 560px">
+      <thead><tr><th>Installed on</th><th>Repositories</th><th>Permissions</th></tr></thead>
+      <tbody>{% for login, i in installs.items() %}<tr>
+        <td><b>{{ login }}</b><div class="hint">{{ 'Organisation' if i.kind == 'org' else 'Personal account' }}</div></td>
+        <td>{{ 'All' if i.repos == 'all' else 'Selected' }}</td>
+        <td><div class="perm">{% for k, v in i.permissions.items()|sort %}<span class="badge muted">{{ k|replace('_', ' ')|capitalize }}: {{ v }}</span>{% endfor %}</div></td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+  </div>
+  {% endif %}
+</section>
+
+<section class="card pad" id="token" aria-labelledby="pat-h">
+  <div class="row-head">
+    <span class="ic" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M15 8l2 2"/></svg></span>
+    <div class="title"><strong id="pat-h">Personal access token</strong><span>Covers accounts the App isn't installed on</span></div>
+    {% if token_expiry %}<span class="badge {{ token_expiry.tone }}">{% if token_expiry.days is none %}Expires {{ token_expiry.text }}{% elif token_expiry.days < 0 %}Expired{% else %}Expires in {{ token_expiry.days }} days{% endif %}</span>
+    {% elif stored('GITHUB_TOKEN') %}<span class="badge {{ 'good' if flag('GITHUB_TOKEN_ENABLED') else 'muted' }}">{{ 'Set' if flag('GITHUB_TOKEN_ENABLED') else 'Off' }}</span>{% else %}<span class="badge muted">Not set up</span>{% endif %}
+  </div>
+  <form method="post" action="{{ url_for('admin.github_token') }}" style="display: flex; flex-direction: column; gap: 16px">
+    {{ csrf() }}
+    <div class="form-grid">
+      <div class="field">
+        <label for="pat">Token</label>
+        {% if stored('GITHUB_TOKEN') %}<div class="stored"><span><strong>Stored</strong> · {{ stored('GITHUB_TOKEN') }}{% if token_expiry %} · expires {{ token_expiry.text }}{% endif %}</span><label class="check" style="min-height: 0"><input type="checkbox" name="remove_token" value="1"> Remove</label></div>{% endif %}
+        <input class="input mono" id="pat" name="GITHUB_TOKEN" type="password" autocomplete="off" placeholder="{{ 'Paste a new token to replace it' if stored('GITHUB_TOKEN') else 'github_pat_…' }}">
+      </div>
+      <div class="field">
+        <span class="label">Permissions it needs (fine-grained)</span>
+        <div class="perm"><span class="badge muted">Pull requests: read and write</span><span class="badge muted">Contents: read</span><span class="badge muted">Metadata: read</span><span class="badge muted">Members: read (org)</span></div>
+        <span class="help">Write only so reviewers can be requested. Branchwarden never pushes or deletes.</span>
+      </div>
+      <div class="field" style="justify-content: flex-end">
+        <label class="check"><input type="checkbox" name="GITHUB_TOKEN_ENABLED" value="1" {{ 'checked' if flag('GITHUB_TOKEN_ENABLED') }}> Use the token</label>
+      </div>
+    </div>
+    <div class="actions"><span></span><div class="end"><button type="submit" class="btn primary">Save token settings</button></div></div>
+  </form>
+</section>
+
+<section class="card panel" id="targets" aria-labelledby="scan-h">
+  <div class="panel-head">
+    <div><h2 id="scan-h">What's scanned</h2><p class="hint" style="margin-top: 4px">Each account uses the App where it's installed, otherwise the token. A new account's first scan records what's there without sending messages.</p></div>
+  </div>
+  {% if targets %}
+  <div class="scroll"><table style="min-width: 680px">
+    <thead><tr><th>Account</th><th>Reached through</th><th>Repositories</th><th>Last scan</th><th><span class="sr-only">Actions</span></th></tr></thead>
+    <tbody>{% for t in targets %}<tr>
+      <td><b>{{ t.login }}</b><div class="hint">{{ 'Organisation' if t.kind == 'org' else 'Personal account' }}</div></td>
+      <td>
+        <form method="post" action="{{ url_for('admin.target_save', target_id=t.id) }}">{{ csrf() }}
+          <label class="sr-only" for="via-{{ t.id }}">Reach {{ t.login }} through</label>
+          <select id="via-{{ t.id }}" name="via" data-autosubmit>
+            {% for v, label in [('auto', 'App, else token'), ('app', 'App only'), ('token', 'Token only')] %}<option value="{{ v }}" {{ 'selected' if t.via == v }}>{{ label }}</option>{% endfor %}
+          </select>
+          {% if t.used %}<div class="hint">last used: {{ 'GitHub App' if t.used == 'app' else 'token' }}</div>{% endif %}
+        </form>
+      </td>
+      <td>{{ t.repo_count }}{% if t.skipped_count %} <span class="hint">· {{ t.skipped_count }} skipped</span>{% endif %}</td>
+      <td>{% if t.last_scan_at %}{{ t.last_scan_at|ago }} ago{% else %}not yet{% endif %}{% if t.last_error %}<div class="hint tone-bad">{{ t.last_error }}</div>{% endif %}</td>
+      <td class="nowrap"><div class="acts">
+        <form method="post" action="{{ url_for('admin.target_save', target_id=t.id) }}">{{ csrf() }}<button class="btn small" name="toggle" value="1">{{ 'Pause' if t.enabled else 'Resume' }}</button></form>
+        <form method="post" action="{{ url_for('admin.target_save', target_id=t.id) }}">{{ csrf() }}<button class="btn small danger" name="delete" value="1">Remove</button></form>
+      </div></td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% endif %}
+  <form class="editor" method="post" action="{{ url_for('admin.target_new') }}">
+    {{ csrf() }}
+    <div class="form-grid">
+      <div class="field"><label for="t-login">Organisation or account</label><input class="input mono" id="t-login" name="login" placeholder="my-org" required></div>
+      <div class="field"><label for="t-kind">It's</label><select id="t-kind" name="kind"><option value="org">an organisation</option><option value="user">a personal account</option></select></div>
+      <div class="field"><label for="t-via">Reach it through</label><select id="t-via" name="via"><option value="auto">App, else token</option><option value="app">App only</option><option value="token">Token only</option></select></div>
+    </div>
+    <div class="actions"><span></span><div class="end"><button type="submit" class="btn primary">Add and scan</button></div></div>
+  </form>
+</section>
+
+<section class="card pad" id="scan" aria-labelledby="rules-h">
+  <h2 id="rules-h">Scanning and branches</h2>
+  <form method="post" action="{{ url_for('admin.github_scan') }}" style="display: flex; flex-direction: column; gap: 16px">
+    {{ csrf() }}
+    <div class="form-grid">
+      <div class="field"><label for="inc">Only repos matching</label><input class="input mono" id="inc" name="REPO_INCLUDE" value="{{ get('REPO_INCLUDE') }}"><span class="help">Comma-separated, * wildcards: <span class="mono">*</span>, <span class="mono">api-*</span>, <span class="mono">my-org/web-*</span></span></div>
+      <div class="field"><label for="exc">Skip repos matching</label><input class="input mono" id="exc" name="REPO_EXCLUDE" value="{{ get('REPO_EXCLUDE') }}" placeholder="sandbox-*, *-archive"></div>
+      <div class="field"><label for="every">Full scan every</label>
+        <select id="every" name="SCAN_INTERVAL_MINUTES">{% for v, label in intervals %}<option value="{{ v }}" {{ 'selected' if get('SCAN_INTERVAL_MINUTES') == v }}>{{ label }}</option>{% endfor %}</select>
+        <span class="help">Webhooks keep PRs current in between.</span></div>
+      <div class="field" style="justify-content: flex-end">
+        <label class="check"><input type="checkbox" name="INCLUDE_ARCHIVED" value="1" {{ 'checked' if flag('INCLUDE_ARCHIVED') }}> Include archived repositories</label>
+        <label class="check"><input type="checkbox" name="INCLUDE_FORKS" value="1" {{ 'checked' if flag('INCLUDE_FORKS') }}> Include forks</label>
+      </div>
+      <div class="field"><label for="stale">Branches are stale after (days)</label><input class="input num" id="stale" name="STALE_DAYS" value="{{ get('STALE_DAYS') }}" inputmode="numeric"></div>
+      <div class="field"><label for="never">Never flag branches matching</label><input class="input mono" id="never" name="NEVER_FLAG" value="{{ get('NEVER_FLAG') }}"></div>
+      <div class="field"><label for="public">Branchwarden's address</label><input class="input mono" id="public" name="PUBLIC_URL" value="{{ get('PUBLIC_URL') }}" placeholder="https://branchwarden.example.com"><span class="help">For links in messages and the webhook URL above.</span></div>
+      <div class="field"><label for="api">GitHub API address</label><input class="input mono" id="api" name="GITHUB_API_URL" value="{{ get('GITHUB_API_URL') }}"><span class="help">Change it only for GitHub Enterprise Server: https://host/api/v3</span></div>
+    </div>
+    <div class="actions"><span></span><div class="end"><button type="submit" class="btn primary">Save</button></div></div>
+  </form>
+</section>
+{% endblock %}

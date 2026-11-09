@@ -1,0 +1,60 @@
+name: branchwarden
+
+services:
+
+  db:
+    image: docker.io/library/postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-branchwarden}
+      # No default: compose refuses to start until .env sets one.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-branchwarden}
+    volumes:
+      - pgdata:/var/lib/postgresql/data:Z
+    # Not published: only the worker and dashboard reach it, on this project's network.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-branchwarden}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  worker:
+    build: .
+    image: localhost/branchwarden:latest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      POSTGRES_HOST: db
+    volumes:
+      - keys:/keys:Z
+
+  dashboard:
+    image: localhost/branchwarden:latest
+    restart: unless-stopped
+    entrypoint: ["./entrypoint.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+      worker:
+        condition: service_started
+    env_file: .env
+    environment:
+      POSTGRES_HOST: db
+    volumes:
+      - keys:/keys:Z
+      - certs:/certs:Z
+    ports:
+      - "${DASHBOARD_EXPOSE:-8443}:8443"
+
+volumes:
+  pgdata:
+    name: ${PGDATA_VOLUME:-branchwarden_pgdata}
+  # The secret key that encrypts stored tokens and webhook URLs: kept apart from the database. Back it up.
+  keys:
+    name: branchwarden_keys
+  certs:
+    name: branchwarden_certs

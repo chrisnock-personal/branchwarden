@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}Branches · Branchwarden{% endblock %}
+{% block body %}
+<main>
+  <div class="page-head">
+    <div>
+      <h1>Branches</h1>
+      <p>{{ total }} branches in scanned repositories · default, protected and never-flag branches are left out</p>
+    </div>
+    <div class="filters">
+      <span style="font-size: 13px; color: var(--muted)">Stale after</span>
+      <div class="seg" role="group" aria-label="Stale after">
+        {% for d in [14, 30, 60, 90] %}
+          <a class="{{ 'on' if days == d }}" href="{{ link(days=(d if d != default_days else '')) }}" {% if days == d %}aria-current="true"{% endif %}>{{ d }} days</a>
+        {% endfor %}
+      </div>
+      <form method="get" action="{{ url_for('branches') }}">
+        <input type="hidden" name="tab" value="{{ tab }}">
+        {% if days != default_days %}<input type="hidden" name="days" value="{{ days }}">{% endif %}
+        {% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
+        <label for="repo" class="sr-only">Repository</label>
+        <select id="repo" name="repo" data-autosubmit>
+          <option value="">All repositories</option>
+          {% for full, name in repos %}<option value="{{ full }}" {{ 'selected' if repo == full }}>{{ name }}</option>{% endfor %}
+        </select>
+        <noscript><button class="btn small" type="submit">Apply</button></noscript>
+      </form>
+    </div>
+  </div>
+
+  <section class="kpis" aria-label="Summary">
+    <div class="card kpi"><div class="label">Without a pull request</div><div class="row"><span class="value">{{ nopr|length }}</span><span class="note">{{ nopr|length - stale|length }} still active</span></div></div>
+    <div class="card kpi"><div class="label">Stale, no PR</div><div class="row"><span class="value {{ 'tone-warn' if stale }}">{{ stale|length }}</span><span class="note">no commits in {{ days }} days</span></div></div>
+    <div class="card kpi"><div class="label">Left after merge</div><div class="row"><span class="value {{ 'tone-warn' if left_merged }}">{{ left_merged }}</span><span class="note">PR merged, branch still there</span></div></div>
+    <div class="card kpi"><div class="label">Left after close</div><div class="row"><span class="value">{{ left_closed }}</span><span class="note">PR closed unmerged</span></div></div>
+  </section>
+
+  {{ flashes() }}
+
+  <div class="layout">
+    <div class="main-col card panel">
+      <div class="panel-head">
+        <nav class="seg" aria-label="Branch view">
+          <a class="{{ 'on' if tab == 'nopr' }}" href="{{ link(tab='') }}" {% if tab == 'nopr' %}aria-current="page"{% endif %}>No pull request <span class="badge muted">{{ stale|length }} stale</span></a>
+          <a class="{{ 'on' if tab == 'left' }}" href="{{ link(tab='left') }}" {% if tab == 'left' %}aria-current="page"{% endif %}>Left after a PR <span class="badge muted">{{ left|length }}</span></a>
+        </nav>
+        {% if q %}<a class="chip" href="{{ link(q='') }}">Clear “{{ q }}”</a>{% endif %}
+      </div>
+      {% if rows %}
+      <div class="scroll">
+        <table style="min-width: 760px">
+          {% if tab == 'nopr' %}
+          <thead><tr><th>Branch</th><th>Last commit</th><th>Ahead / behind</th><th>Status</th><th><span class="sr-only">Actions</span></th></tr></thead>
+          {% else %}
+          <thead><tr><th>Branch</th><th>Pull request</th><th>Ahead / behind</th><th>Status</th><th><span class="sr-only">Actions</span></th></tr></thead>
+          {% endif %}
+          <tbody>
+          {% for b in rows %}
+            <tr>
+              <td><div class="br">{{ b.name }}</div><div class="pr-sub" style="font-family: var(--body)">{{ b.repo_name }}</div></td>
+              {% if tab == 'nopr' %}
+              <td class="nowrap"><div>{{ b.age }} ago</div><div class="pr-sub" style="font-family: var(--body)">{{ b.last_committer or '—' }}</div></td>
+              {% else %}
+              <td><div>#{{ b.pr_number }} {{ 'merged' if b.pr_state == 'MERGED' else 'closed unmerged' }}{% if b.pr_merged_by %} by {{ b.pr_merged_by }}{% endif %}</div>
+                <div class="pr-sub" style="font-family: var(--body)">{{ (b.pr_merged_at or b.pr_closed_at)|ago }} ago · {{ b.pr_title }}</div></td>
+              {% endif %}
+              <td class="nowrap mono" style="font-size: 13px; color: var(--text2)">{% if b.ahead is not none %}+{{ b.ahead }} / −{{ b.behind }}{% else %}—{% endif %}</td>
+              <td class="nowrap"><span class="badge {{ b.tone }}">{{ b.status_label }}</span></td>
+              <td class="nowrap"><div class="acts">
+                {% if b.url %}<a class="btn small" href="{{ b.url }}" target="_blank" rel="noopener">Open on GitHub</a>{% endif %}
+                {% if can_act %}
+                <form method="post" action="{{ url_for('ignore_branch', branch_id=b.id) }}">
+                  {{ csrf() }}<input type="hidden" name="back" value="{{ request.full_path }}">
+                  <button type="submit" class="btn small dashed">Ignore</button>
+                </form>
+                {% endif %}
+              </div></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+        <div class="empty">{{ 'No branches without a pull request.' if tab == 'nopr' else 'No branches left behind by merged or closed pull requests.' }}</div>
+      {% endif %}
+    </div>
+
+    <div class="side-col">
+      <div class="notice"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--info)" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="flex: none; margin-top: 1px"><circle cx="12" cy="12" r="9"/><path d="M12 8v.01M12 11v5"/></svg><span>Branchwarden only flags branches. It never deletes them: tidy up on GitHub, or turn on <b>Automatically delete head branches</b> in each repo's settings.</span></div>
+
+      <div class="card pad">
+        <h2>Never flag</h2>
+        <div class="tags">{% for n in never %}<span class="tag" style="padding-right: 12px">{{ n }}</span>{% else %}<span class="hint">No patterns.</span>{% endfor %}</div>
+        <p class="hint">Default and protected branches are always left out.{% if current_user.role == 'admin' %} <a href="{{ url_for('admin.github') }}#scan">Change the patterns</a>.{% endif %}</p>
+      </div>
+
+      <div class="card panel" id="ignored">
+        <div class="panel-head"><h2>Ignored branches</h2><span class="badge muted">{{ ignored|length }}</span></div>
+        {% for i in ignored %}
+          <div class="channel">
+            <div><strong class="br">{{ i.name }}</strong><span class="detail">{{ i.repo_name }} · by {{ i.ignored_by or '—' }}, {{ i.ignored_at.strftime('%d %b') }}</span></div>
+            {% if can_act %}
+            <form method="post" action="{{ url_for('unignore_branch', repo_id=i.repo_id, name=i.name) }}">{{ csrf() }}<button class="btn small" type="submit">Flag again</button></form>
+            {% endif %}
+          </div>
+        {% else %}<div class="empty">Nothing ignored.</div>{% endfor %}
+      </div>
+
+      <div class="card pad">
+        <h2>Stale-branch digest</h2>
+        <div class="facts">
+          <div>Sent<b>{% if digest.enabled %}{{ digest.params.day|capitalize }}days {{ digest.params.time }}{% else %}Off{% endif %}</b></div>
+          <div>To<b>{{ digest_to|join(', ') or digest_target }}</b></div>
+          {% if digest.last_run_at %}<div>Last sent<b>{{ digest.last_run_at.strftime('%d %b %H:%M') }}</b></div>{% endif %}
+        </div>
+        <p class="hint">Each stale branch's last committer is @mentioned, when People has their Teams or Slack identity.</p>
+        {% if current_user.role == 'admin' %}<a class="btn small" href="{{ url_for('admin.notifications') }}#rule-digest" style="align-self: flex-start">Edit reminder rules</a>{% endif %}
+      </div>
+    </div>
+  </div>
+</main>
+{% endblock %}

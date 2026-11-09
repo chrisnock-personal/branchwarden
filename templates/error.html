@@ -1,0 +1,9 @@
+{% extends "auth_base.html" %}
+{% block title %}{{ code }} · Branchwarden{% endblock %}
+{% block card %}
+<div class="card pad">
+  <h1>{{ title }}</h1>
+  <p class="hint">{{ message }}</p>
+  <a class="btn" href="/">Back to the overview</a>
+</div>
+{% endblock %}

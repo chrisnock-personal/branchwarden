@@ -1,0 +1,54 @@
+{% extends "settings_base.html" %}
+{% block title %}TLS certificate · Branchwarden{% endblock %}
+{% block heading %}
+<div>
+  <h1>TLS certificate</h1>
+  <p class="lede">The dashboard serves HTTPS only (TLS 1.2 and up). On the first start it made a self-signed certificate; upload one your browsers trust to stop the warning.</p>
+</div>
+{% endblock %}
+{% block content %}
+{% if not enabled %}
+<div class="flash warn">TLS is switched off (<span class="mono">BRANCHWARDEN_TLS=off</span>): something in front of Branchwarden must provide HTTPS.</div>
+{% else %}
+{% if error %}<div class="flash bad">{{ error }}</div>{% endif %}
+{% if info %}
+<section class="card pad" aria-labelledby="cur-h">
+  <div class="row-head">
+    <div class="title"><strong id="cur-h">Current certificate</strong><span>{{ info.subject }}</span></div>
+    {% if info.self_signed %}<span class="badge warn">Self-signed</span>{% else %}<span class="badge good">Issued by {{ info.issuer.split(',')[0].replace('CN=', '') }}</span>{% endif %}
+    <span class="badge {{ 'bad' if info.days_left < 0 else 'warn' if info.days_left < 30 else 'good' }}">{{ 'Expired' if info.days_left < 0 else 'Expires in ' ~ info.days_left ~ ' days' }}</span>
+  </div>
+  <div class="facts">
+    <div>Names<b class="mono-box">{{ info.names|join(', ') or '—' }}</b></div>
+    <div>Valid<b>{{ info.not_before.strftime('%d %b %Y') }} – {{ info.expires.strftime('%d %b %Y') }}</b></div>
+    <div>Chain<b>{{ info.chain }} certificate{{ 's' if info.chain != 1 }}</b></div>
+    <div>SHA-256<b class="mono-box">{{ info.fingerprint }}</b></div>
+  </div>
+  {% if info.self_signed %}<p class="hint">Browsers will warn until you trust it or upload another. Check the fingerprint above matches the one the browser shows.</p>{% endif %}
+</section>
+{% endif %}
+
+<form class="card pad" method="post" action="{{ url_for('admin.tls_save') }}" enctype="multipart/form-data" aria-labelledby="up-h">
+  {{ csrf() }}
+  <h2 id="up-h">Upload a certificate</h2>
+  <div class="form-grid">
+    <div class="field"><label for="cert">Certificate (PEM)</label><input class="input" id="cert" name="cert" type="file" accept=".pem,.crt,.cer"><textarea class="input" name="cert_text" rows="3" placeholder="…or paste -----BEGIN CERTIFICATE-----" aria-label="Certificate PEM text"></textarea></div>
+    <div class="field"><label for="key">Private key (PEM, unencrypted)</label><input class="input" id="key" name="key" type="file" accept=".pem,.key"><textarea class="input" name="key_text" rows="3" placeholder="…or paste -----BEGIN PRIVATE KEY-----" aria-label="Private key PEM text"></textarea></div>
+    <div class="field wide"><label for="chain">Intermediate chain (optional)</label><input class="input" id="chain" name="chain" type="file" accept=".pem,.crt"><textarea class="input" name="chain_text" rows="2" placeholder="…or paste the intermediates" aria-label="Chain PEM text"></textarea></div>
+  </div>
+  <div class="actions">
+    <p class="hint">Checked before anything changes: the key must match and the certificate must be in date. The old one is kept so it can be restored.</p>
+    <div class="end"><button type="submit" class="btn primary">Check and install</button></div>
+  </div>
+</form>
+
+<div class="card pad">
+  <h2>Other actions</h2>
+  <div class="acts" style="justify-content: flex-start">
+    {% if has_previous %}<form method="post" action="{{ url_for('admin.tls_save') }}">{{ csrf() }}<button class="btn small" name="restore" value="1">Restore the previous certificate</button></form>{% endif %}
+    <form method="post" action="{{ url_for('admin.tls_save') }}">{{ csrf() }}<button class="btn small" name="self_signed" value="1">Make a new self-signed certificate</button></form>
+  </div>
+  <p class="hint">Self-signed certificates cover the names in <span class="mono">TLS_HOSTNAMES</span> (in .env) plus the container's host name and localhost.</p>
+</div>
+{% endif %}
+{% endblock %}

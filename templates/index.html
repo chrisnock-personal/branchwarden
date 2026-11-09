@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block head %}<meta http-equiv="refresh" content="60">{% endblock %}
+{% block body %}
+<main>
+  <div class="page-head">
+    <div>
+      <h1>Overview</h1>
+      <p>
+        {% if watching.targets %}Watching {% for t in watching.targets %}<b>{{ t.login }}</b>{{ ', ' if not loop.last }}{% endfor %}
+        · {{ watching.repo_count }} repositor{{ 'y' if watching.repo_count == 1 else 'ies' }} · scanning every {{ watching.interval }} min
+        {% if watching.last %}· last scan {{ watching.last.finished_at.strftime('%H:%M') }}, took {{ ((watching.last.finished_at - watching.last.started_at).total_seconds())|round|int }} s{% endif %}
+        {% else %}Nothing to watch yet.{% if current_user.role == 'admin' %} <a href="{{ url_for('admin.github') }}">Connect GitHub and add an account</a>.{% endif %}{% endif %}
+      </p>
+    </div>
+    {% if can_act %}
+    <form method="post" action="{{ url_for('scan_now') }}">
+      {{ csrf() }}<input type="hidden" name="back" value="{{ url_for('index') }}">
+      <button type="submit" class="btn small">Scan now</button>
+    </form>
+    {% endif %}
+  </div>
+  {{ flashes() }}
+
+  {% if watching.last and watching.last.error %}
+  <div class="flash bad" role="alert"><span><b>The last scan had problems:</b> {{ watching.last.error }}</span></div>
+  {% endif %}
+
+  <section class="kpis" aria-label="Summary">
+    {% for k in kpis %}
+    <div class="card kpi"><div class="label">{{ k.label }}</div><div class="row"><span class="value {{ k.tone }}">{{ k.value }}</span><span class="note">{{ k.note }}</span></div></div>
+    {% endfor %}
+  </section>
+
+  <section aria-labelledby="repos-h">
+    <div class="section-head">
+      <h2 id="repos-h">Repositories</h2>
+      {% if repo_total > cards|length %}<span style="font-size: 13px; color: var(--muted)">the {{ cards|length }} busiest of {{ repo_total }}</span>{% endif %}
+    </div>
+    {% if cards %}
+    <div class="repos">
+      {% for r in cards %}
+        <a class="card repo" href="{{ url_for('pulls', repo=r.full_name) }}">
+          <strong>{{ r.name }}</strong>
+          <span class="status {{ r.tone }} dot">{{ r.status }}</span>
+          <span class="meta">{{ r.meta }}</span>
+        </a>
+      {% endfor %}
+    </div>
+    {% else %}
+      <div class="card empty" style="margin-top: 12px">No repositories scanned yet.</div>
+    {% endif %}
+  </section>
+
+  <section class="health wide-left">
+    <div class="card panel">
+      <div class="panel-head">
+        <h2>Needs attention</h2>
+        <a href="{{ url_for('pulls') }}" style="font-size: 13px">All {{ pr_total }} pull request{{ 's' if pr_total != 1 }}</a>
+      </div>
+      {% if attention %}
+      <div class="scroll">
+        <table style="min-width: 640px">
+          <thead><tr><th>Pull request</th><th>State</th><th>Reviewers</th><th>Waiting</th><th><span class="sr-only">Action</span></th></tr></thead>
+          <tbody>
+          {% for p in attention %}
+            <tr>
+              <td><a class="pr-title" href="{{ p.url }}" target="_blank" rel="noopener">{{ p.title }}</a><div class="pr-sub">{{ p.ref }} · {{ p.head_ref }}</div></td>
+              <td class="nowrap"><span class="badge {{ p.tone }}">{{ p.state_label }}</span></td>
+              <td>{% include "_marks.html" %}</td>
+              <td class="nowrap sub">{{ p.waiting }}</td>
+              <td class="nowrap"><a class="btn small" href="{{ url_for('pulls', assign=p.id) }}">{{ 'Reviewers' if can_act else 'Details' }}</a></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}<div class="empty">No open pull requests.</div>{% endif %}
+    </div>
+
+    <div class="side">
+      <div class="card panel" id="deliveries">
+        <div class="panel-head"><h2>Delivery channels</h2>
+          {% set failing = channels|selectattr('status', 'equalto', 'failing')|list %}
+          {% if failing %}<span class="badge bad">{{ failing|length }} failing</span>{% endif %}
+        </div>
+        {% for c in channels %}
+          <div class="channel">
+            <div><strong>{{ c.kind_label }} · {{ c.name }}</strong><span class="detail">{{ c.detail }}</span></div>
+            <span class="badge {{ c.tone }}">{{ c.status }}</span>
+          </div>
+        {% else %}
+          <div class="empty">No Teams or Slack channel yet.{% if current_user.role == 'admin' %} <a href="{{ url_for('admin.notifications') }}">Add one</a>.{% endif %}</div>
+        {% endfor %}
+      </div>
+
+      <div class="card panel">
+        <div class="panel-head"><h2>Scan log</h2><span style="font-size: 13px; color: var(--muted)">last {{ bars|length }}</span></div>
+        <div class="poll-body">
+          {% if bars %}
+          <div class="bars" role="img" aria-label="Open PRs seen in each of the last {{ bars|length }} scans">
+            {% for b in bars %}<div class="{{ 'err' if b.error else '' }}" style="height: {{ b.height }}%" title="{{ b.started_at.strftime('%d %b %H:%M') }} · {{ b.trigger }} · {{ b.repos }} repos · {{ b.prs }} PRs{% if b.error %} · {{ b.error }}{% endif %}"></div>{% endfor %}
+          </div>
+          <div class="poll-axis"><span>{{ bars[0].started_at.strftime('%H:%M') }}</span><span>{{ bars[-1].started_at.strftime('%H:%M') }}</span></div>
+          {% endif %}
+          <div class="facts">
+            <div><span>Connection</span><b>{{ conns_label }}</b></div>
+            {% if watching.last and watching.last.rate_limit %}<div><span>API budget left this hour</span><b class="mono">{{ "{:,}".format(watching.last.rate_remaining) }} / {{ "{:,}".format(watching.last.rate_limit) }}</b></div>{% endif %}
+            {% if watching.last %}<div><span>Last scan</span><b>{{ watching.last.finished_at.strftime('%H:%M') }} · {{ watching.last.repos }} repos · {{ watching.last.trigger }}</b></div>{% endif %}
+            <div><span>Webhook events in 24 h</span><b>{{ hooks_today }}</b></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer><span>Branchwarden only reads branches. It never deletes or pushes them.</span><span class="mono">refreshes every minute · {{ now.strftime('%Y-%m-%d %H:%M UTC') }}</span></footer>
+</main>
+{% endblock %}

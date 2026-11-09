@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Deliveries · Branchwarden{% endblock %}
+{% block head %}<meta http-equiv="refresh" content="60">{% endblock %}
+{% block body %}
+<main>
+  <div class="page-head">
+    <div>
+      <h1>Deliveries</h1>
+      <p>Messages to Teams and Slack, scans, and webhook events from GitHub</p>
+    </div>
+  </div>
+  {{ flashes() }}
+
+  <section class="health">
+    <div class="card panel">
+      <div class="panel-head"><h2>Channels</h2></div>
+      {% for c in channels %}
+        <div class="channel">
+          <div><strong>{{ c.kind_label }} · {{ c.name }}</strong><span class="detail">{{ c.detail }}{% if c.pending %} · {{ c.pending }} waiting{% endif %}</span></div>
+          <span class="badge {{ c.tone }}">{{ c.status }}</span>
+        </div>
+      {% else %}<div class="empty">No channels yet.</div>{% endfor %}
+    </div>
+    <div class="card panel">
+      <div class="panel-head"><h2>Webhook events</h2><span class="hint">last 30</span></div>
+      {% if hooks %}
+      <div class="scroll"><table>
+        <thead><tr><th>Received</th><th>Event</th><th>Repository</th><th>Result</th></tr></thead>
+        <tbody>{% for h in hooks %}<tr>
+          <td class="nowrap sub">{{ h.received_at.strftime('%d %b %H:%M:%S') }}</td>
+          <td class="nowrap mono" style="font-size: 13px">{{ h.event }}{% if h.action %}.{{ h.action }}{% endif %}</td>
+          <td class="sub">{{ h.repo or '—' }}</td>
+          <td class="nowrap"><span class="badge {{ 'good' if h.status in (200, 202) else 'muted' if h.status == 204 else 'bad' }}">{{ {200: 'ping', 202: 'rescan', 204: 'ignored', 401: 'bad signature'}.get(h.status, h.status) }}</span></td>
+        </tr>{% endfor %}</tbody>
+      </table></div>
+      {% else %}<div class="empty">No webhook events yet. They need the GitHub App, with its webhook pointed here.</div>{% endif %}
+    </div>
+  </section>
+
+  <section class="card panel" aria-labelledby="msg-h">
+    <div class="panel-head">
+      <h2 id="msg-h">Messages</h2>
+      <div class="chips">
+        {% for s, label in [('all', 'All'), ('pending', 'Waiting'), ('sent', 'Sent'), ('failed', 'Failed')] %}
+          <a class="chip {{ 'on' if status == s }}" href="{{ link(status=s if s != 'all' else '') }}">{{ label }}{% if s != 'all' %} <span class="n">{{ counts.get(s, 0) }}</span>{% endif %}</a>
+        {% endfor %}
+      </div>
+    </div>
+    {% if rows %}
+    <div class="scroll"><table style="min-width: 760px">
+      <thead><tr><th>Queued</th><th>Channel</th><th>Kind</th><th>Message</th><th>Status</th><th style="text-align: right">Attempts</th><th>Error</th></tr></thead>
+      <tbody>{% for r in rows %}<tr>
+        <td class="nowrap sub">{{ r.created_at.strftime('%d %b %H:%M:%S') }}</td>
+        <td class="nowrap">{{ 'Teams' if r.channel_kind == 'teams' else 'Slack' }} · {{ r.channel_name }}</td>
+        <td class="nowrap sub">{{ r.kind }}</td>
+        <td><div>{{ r.heading }}</div>{% if r.subject %}<div class="pr-sub">{{ r.subject }}</div>{% endif %}</td>
+        <td class="nowrap"><span class="badge {{ {'sent': 'good', 'failed': 'bad', 'pending': 'warn'}[r.status] }}">{{ r.status }}</span></td>
+        <td class="sub" style="text-align: right">{{ r.attempts }}</td>
+        <td class="sub">{{ r.last_error or '—' }}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    {% else %}<div class="empty">No messages{{ '' if status == 'all' else ' with this status' }}.</div>{% endif %}
+  </section>
+
+  <section class="card panel" aria-labelledby="scan-h">
+    <div class="panel-head"><h2 id="scan-h">Scans</h2><span class="hint">last 30</span></div>
+    {% if scans %}
+    <div class="scroll"><table style="min-width: 720px">
+      <thead><tr><th>Started</th><th>Trigger</th><th style="text-align: right">Repos</th><th style="text-align: right">Open PRs</th><th style="text-align: right">Branches</th><th style="text-align: right">Events</th><th>API left</th><th>Problems</th></tr></thead>
+      <tbody>{% for s in scans %}<tr>
+        <td class="nowrap sub">{{ s.started_at.strftime('%d %b %H:%M:%S') }}{% if s.finished_at %} · {{ ((s.finished_at - s.started_at).total_seconds())|round(1) }} s{% else %} · running{% endif %}</td>
+        <td class="nowrap sub">{{ s.trigger }}</td>
+        <td class="sub" style="text-align: right">{{ s.repos }}</td>
+        <td class="sub" style="text-align: right">{{ s.prs }}</td>
+        <td class="sub" style="text-align: right">{{ s.branches }}</td>
+        <td class="sub" style="text-align: right">{{ s.events }}</td>
+        <td class="nowrap mono sub" style="font-size: 13px">{{ s.rate_remaining if s.rate_remaining is not none else '—' }}</td>
+        <td class="sub {{ 'tone-bad' if s.error }}">{{ s.error or '—' }}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    {% else %}<div class="empty">No scans yet.</div>{% endif %}
+  </section>
+</main>
+{% endblock %}

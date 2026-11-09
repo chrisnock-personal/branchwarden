@@ -1,0 +1,131 @@
+{% extends "settings_base.html" %}
+{% block title %}Channels and reminders · Branchwarden{% endblock %}
+{% block heading %}
+<div>
+  <h1>Channels and reminders</h1>
+  <p class="lede">Where messages go, and when Branchwarden nudges people about reviews, merges and closures. @mentions use the GitHub-to-Teams/Slack matches under <a href="{{ url_for('admin.people') }}">People</a>.</p>
+</div>
+{% endblock %}
+{% block content %}
+<section id="channels" aria-labelledby="ch-h" style="display: flex; flex-direction: column; gap: 10px">
+  <div class="sec-head">
+    <div><h2 id="ch-h">Channels</h2><p class="hint">Each channel gets the PRs of the repos and teams routed to it; with neither set, it gets everything.</p></div>
+    <div class="acts"><a class="btn small dashed" href="{{ url_for('admin.notifications', open='new-teams') }}#new">Add Teams channel</a><a class="btn small dashed" href="{{ url_for('admin.notifications', open='new-slack') }}#new">Add Slack channel</a></div>
+  </div>
+
+  {% if open_id.startswith('new-') %}
+  {% set kind = open_id[4:] %}
+  <form class="card channel-card open" id="new" method="post" action="{{ url_for('admin.channel_new') }}">
+    {{ csrf() }}<input type="hidden" name="kind" value="{{ kind }}">
+    <div class="row-head"><span class="ic" aria-hidden="true">{{ 'T' if kind == 'teams' else 'S' }}</span><div class="title"><strong>New {{ 'Teams' if kind == 'teams' else 'Slack' }} channel</strong>
+      <span>{% if kind == 'teams' %}In Teams: channel ⋯ › Workflows › “Post to a channel when a webhook request is received”, then copy its URL.{% else %}In Slack: create an app › Incoming Webhooks › Add New Webhook to Workspace, pick the channel, copy the URL.{% endif %}</span></div></div>
+    <div class="editor">
+      <div class="form-grid">
+        <div class="field"><label for="n-name">Name</label><input class="input" id="n-name" name="name" placeholder="{{ 'Platform reviews' if kind == 'teams' else '#web-team' }}" required></div>
+        <div class="field"><label for="n-url">Webhook URL</label><input class="input mono" id="n-url" name="url" type="password" autocomplete="off" required placeholder="https://…"><span class="help">Encrypted here and never shown again.</span></div>
+        <div class="field"><label for="n-repos">Repos</label><input class="input mono" id="n-repos" name="repos" placeholder="api-*, my-org/web-console"></div>
+        <div class="field"><label for="n-teams">Teams</label><input class="input mono" id="n-teams" name="teams" placeholder="my-org/platform"><span class="help">A PR matches when one of these teams is asked to review it.</span></div>
+      </div>
+      <div class="actions"><a class="btn" href="{{ url_for('admin.notifications') }}">Cancel</a><button class="btn primary" type="submit">Add channel</button></div>
+    </div>
+  </form>
+  {% endif %}
+
+  {% for c in channels %}
+  {% set is_open = open_id == c.id|string %}
+  <div class="card channel-card {{ 'open' if is_open }}" id="ch-{{ c.id }}">
+    <div class="row-head">
+      <span class="ic" aria-hidden="true">{{ 'T' if c.kind == 'teams' else 'S' }}</span>
+      <div class="title"><strong>{{ c.kind_label }} · {{ c.name }}</strong><span>{{ 'Workflows webhook · Adaptive Card' if c.kind == 'teams' else 'Incoming webhook · Block Kit' }} · {{ c.routes }}</span></div>
+      <span class="badge {{ c.tone }}" title="{{ c.detail }}">{{ c.status }}{% if c.status == 'ok' %} · {{ c.sent_24h }} today{% endif %}</span>
+      {% if is_open %}<a class="btn small" href="{{ url_for('admin.notifications') }}#ch-{{ c.id }}">Close</a>{% else %}<a class="btn small" href="{{ url_for('admin.notifications', open=c.id) }}#ch-{{ c.id }}">Edit</a>{% endif %}
+      <form method="post" action="{{ url_for('admin.channel_save', cid=c.id) }}" class="inline">{{ csrf() }}<input type="hidden" name="toggle" value="1">
+        <button type="submit" class="switch" aria-pressed="{{ 'true' if c.enabled else 'false' }}" aria-label="{{ c.name }} switched {{ 'on' if c.enabled else 'off' }}"></button></form>
+    </div>
+    {% if c.status == 'failing' and not is_open %}<p class="hint tone-bad" style="padding: 0 20px 14px; margin: 0">{{ c.detail }}</p>{% endif %}
+    {% if is_open %}
+    <div class="editor">
+      <form method="post" action="{{ url_for('admin.channel_save', cid=c.id) }}" style="display: flex; flex-direction: column; gap: 16px">
+        {{ csrf() }}
+        <div class="form-grid">
+          <div class="field"><label for="c-name">Name</label><input class="input" id="c-name" name="name" value="{{ c.name }}"></div>
+          <div class="field"><label for="c-url">Webhook URL</label>
+            {% if c.stored %}<div class="stored"><span><strong>Stored</strong> · {{ c.url_host }} · {{ c.stored }}</span></div>{% endif %}
+            <input class="input mono" id="c-url" name="url" type="password" autocomplete="off" placeholder="Paste a new URL to replace it"></div>
+          <div class="field"><label for="c-repos">Repos</label><input class="input mono" id="c-repos" name="repos" value="{{ c.repos }}" placeholder="every repo"></div>
+          <div class="field"><label for="c-teams">Teams</label><input class="input mono" id="c-teams" name="teams" value="{{ c.teams }}" placeholder="my-org/platform"></div>
+        </div>
+        <p class="hint">A PR matches if its repo is listed, or a requested reviewer is a listed team. The digest uses the repos only.</p>
+        <div class="actions">
+          <button type="submit" class="btn small danger" name="delete" value="1">Remove channel</button>
+          <div class="end"><button type="submit" class="btn primary">Save</button></div>
+        </div>
+      </form>
+      <form method="post" action="{{ url_for('admin.channel_test', cid=c.id) }}">{{ csrf() }}<button type="submit" class="btn small">Send a test message</button></form>
+    </div>
+    {% endif %}
+  </div>
+  {% else %}
+    {% if not open_id.startswith('new-') %}<div class="card empty">No channels yet. Add a Teams or Slack channel to start getting messages.</div>{% endif %}
+  {% endfor %}
+</section>
+
+<section class="card pad" id="hours" aria-labelledby="hours-h">
+  <h2 id="hours-h">Working hours</h2>
+  <p class="hint">Reminders and “working hours” waits count only these hours. Events and the digest aren't held.</p>
+  <form method="post" action="{{ url_for('admin.workhours') }}" style="display: flex; flex-direction: column; gap: 14px">
+    {{ csrf() }}
+    {% set on_days = get('WORK_DAYS').split(',') %}
+    <fieldset><legend class="sr-only">Working days</legend><div class="days">
+      {% for d in days %}<label><input type="checkbox" name="day_{{ d }}" value="1" {{ 'checked' if d in on_days }}> {{ d|capitalize }}</label>{% endfor %}
+    </div></fieldset>
+    <div class="inline-form">
+      <label for="ws">From</label><input class="input num" id="ws" name="WORK_START" value="{{ get('WORK_START') }}" pattern="[0-2][0-9]:[0-5][0-9]">
+      <label for="we">to</label><input class="input num" id="we" name="WORK_END" value="{{ get('WORK_END') }}" pattern="[0-2][0-9]:[0-5][0-9]">
+      <label for="wz">in</label><input class="input mono" id="wz" name="WORK_TZ" value="{{ get('WORK_TZ') }}" style="width: 200px">
+      <button class="btn small" type="submit">Save</button>
+    </div>
+  </form>
+</section>
+
+<section id="rules" aria-labelledby="ru-h" style="display: flex; flex-direction: column; gap: 10px">
+  <div><h2 id="ru-h">Rules</h2><p class="hint">Reminders wait for working hours; each one stops after its maximum, and starts afresh if the PR leaves that state and comes back.</p></div>
+  {% for r in rules %}
+  {% set is_open = open_id == r.key %}
+  <div class="card channel-card {{ 'open' if is_open }}" id="rule-{{ r.key }}">
+    <div class="row-head">
+      <div class="title"><strong>{{ r.name }}</strong><span>{{ r.desc }}</span></div>
+      <div class="acts"><span class="badge {{ {'event': 'info', 'reminder': 'warn', 'digest': 'muted'}[r.kind] }}">{{ r.kind|capitalize }}</span><span class="badge muted">{{ r.to }}</span></div>
+      {% if is_open %}<a class="btn small" href="{{ url_for('admin.notifications') }}#rule-{{ r.key }}">Close</a>{% else %}<a class="btn small" href="{{ url_for('admin.notifications', open=r.key) }}#rule-{{ r.key }}">Edit</a>{% endif %}
+      <form method="post" action="{{ url_for('admin.rule_save', key=r.key) }}" class="inline">{{ csrf() }}<input type="hidden" name="toggle" value="1">
+        <button type="submit" class="switch" aria-pressed="{{ 'true' if r.enabled else 'false' }}" aria-label="{{ r.name }} switched {{ 'on' if r.enabled else 'off' }}"></button></form>
+    </div>
+    {% if is_open %}
+    {% set p = r.params %}
+    <form class="editor" method="post" action="{{ url_for('admin.rule_save', key=r.key) }}">
+      {{ csrf() }}
+      {% if r.kind == 'reminder' %}
+        <div class="inline-form">After <input class="input num" name="after" value="{{ p.after }}" aria-label="Wait"> <select name="unit" aria-label="Unit">{% for u, label in units %}<option value="{{ u }}" {{ 'selected' if p.unit == u }}>{{ label }}</option>{% endfor %}</select> in this state,</div>
+        <div class="inline-form">post to <select name="target" aria-label="Where">{% include "_targets.html" %}</select></div>
+        <div class="inline-form">then again every <input class="input num" name="repeat" value="{{ p.repeat }}" aria-label="Repeat"> (same unit), at most <input class="input num" name="max" value="{{ p.max }}" aria-label="Maximum"> times</div>
+        <label class="check"><input type="checkbox" name="mention" value="1" {{ 'checked' if p.mention }}> @mention {{ 'the requested reviewers' if r.key == 'waiting' else 'the author' }}</label>
+        <div class="inline-form">Skip PRs labelled <input class="input mono" name="skip_label" value="{{ p.skip_label }}" style="width: 200px" aria-label="Skip label"> (drafts are always skipped)</div>
+        <label class="check"><input type="checkbox" name="group" value="1" {{ 'checked' if p.group }}> One message per channel listing every PR, instead of one per PR</label>
+      {% elif r.kind == 'digest' %}
+        <div class="inline-form">Every <select name="day" aria-label="Day">{% for d in days %}<option value="{{ d }}" {{ 'selected' if p.day == d }}>{{ d|capitalize }}day</option>{% endfor %}</select>
+          at <input class="input num" name="time" value="{{ p.time }}" aria-label="Time"> (working-hours time zone), to <select name="target" aria-label="Where">{% include "_targets.html" %}</select></div>
+        <label class="check"><input type="checkbox" name="mention" value="1" {{ 'checked' if p.mention }}> @mention each stale branch's last committer</label>
+      {% else %}
+        <div class="inline-form">Post to <select name="target" aria-label="Where">{% include "_targets.html" %}</select></div>
+        <label class="check"><input type="checkbox" name="mention" value="1" {{ 'checked' if p.mention }}> @mention {{ 'the requested reviewers' if r.key == 'opened' else 'the author' if r.key == 'review' else 'people' }}</label>
+      {% endif %}
+      <div class="actions">
+        {% if r.key == 'digest' %}<button class="btn small" name="send_now" value="1">Send it now</button>{% else %}<span></span>{% endif %}
+        <div class="end"><button class="btn primary" type="submit">Save rule</button></div>
+      </div>
+    </form>
+    {% endif %}
+  </div>
+  {% endfor %}
+</section>
+{% endblock %}

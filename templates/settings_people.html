@@ -1,0 +1,33 @@
+{% extends "settings_base.html" %}
+{% block title %}People · Branchwarden{% endblock %}
+{% block heading %}
+<div>
+  <h1>People</h1>
+  <p class="lede">Match GitHub logins to Teams and Slack, so reminders @mention the right person. Everyone seen as an author, reviewer or committer is listed; {{ matched }} {{ 'is' if matched == 1 else 'are' }} matched so far.</p>
+</div>
+{% endblock %}
+{% block content %}
+<form method="get" class="search" style="max-width: 360px">
+  <label for="pq" class="sr-only">Filter people</label>
+  <input id="pq" type="search" name="q" value="{{ q }}" placeholder="Filter by login or name">
+</form>
+<form class="card panel" method="post" action="{{ url_for('admin.people_save', q=q) }}">
+  {{ csrf() }}
+  {% if people %}
+  <div class="scroll"><table class="people-edit" style="min-width: 760px">
+    <thead><tr><th>GitHub login</th><th>Name</th><th>Teams (user principal name)</th><th>Slack member ID</th></tr></thead>
+    <tbody>{% for p in people %}<tr>
+      <td><span class="mono" style="font-size: 13px">{{ p.login }}</span>{% if p.open_prs %}<div class="hint">{{ p.open_prs }} open PR{{ 's' if p.open_prs != 1 }}</div>{% endif %}
+        <input type="hidden" name="login" value="{{ p.login }}"></td>
+      <td><label class="sr-only" for="n-{{ loop.index }}">Name for {{ p.login }}</label><input class="input" id="n-{{ loop.index }}" name="name" value="{{ p.name or '' }}"></td>
+      <td><label class="sr-only" for="t-{{ loop.index }}">Teams for {{ p.login }}</label><input class="input mono" id="t-{{ loop.index }}" name="teams_id" value="{{ p.teams_id or '' }}" placeholder="name@company.com"></td>
+      <td><label class="sr-only" for="s-{{ loop.index }}">Slack for {{ p.login }}</label><input class="input mono" id="s-{{ loop.index }}" name="slack_id" value="{{ p.slack_id or '' }}" placeholder="U01ABCDEF2"></td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  <div class="actions" style="padding: 14px 20px; border-top: 1px solid var(--border)">
+    <p class="hint">Slack: profile › ⋮ › Copy member ID. Without a match, the message shows the name in bold instead of a mention.</p>
+    <div class="end"><button type="submit" class="btn primary">Save</button></div>
+  </div>
+  {% else %}<div class="empty">{{ 'Nobody matches.' if q else 'Nobody seen yet. People appear after the first scan.' }}</div>{% endif %}
+</form>
+{% endblock %}

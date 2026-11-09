@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}Pull requests · Branchwarden{% endblock %}
+{% block body %}
+<main>
+  <div class="page-head">
+    <div>
+      <h1>Pull requests</h1>
+      <p>{{ total }} open across {{ repo_count }} repositor{{ 'y' if repo_count == 1 else 'ies' }}
+        {% if last_hook %}· updated by webhook {{ last_hook|ago }} ago{% elif last_scan %}· scanned {{ last_scan|ago }} ago{% endif %}</p>
+    </div>
+    <div class="filters">
+      <form method="get" action="{{ url_for('pulls') }}">
+        <input type="hidden" name="state" value="{{ state }}">
+        {% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
+        <label for="repo" class="sr-only">Repository</label>
+        <select id="repo" name="repo" data-autosubmit>
+          <option value="">All repositories</option>
+          {% for full, name in repos %}<option value="{{ full }}" {{ 'selected' if repo == full }}>{{ name }}</option>{% endfor %}
+        </select>
+        <label for="sort" class="sr-only">Sort</label>
+        <select id="sort" name="sort" data-autosubmit>
+          {% for k, label in sorts %}<option value="{{ k }}" {{ 'selected' if sort == k }}>{{ label }}</option>{% endfor %}
+        </select>
+        <noscript><button class="btn small" type="submit">Apply</button></noscript>
+      </form>
+    </div>
+  </div>
+
+  <div class="chips" role="group" aria-label="Filter by state">
+    {% for c in chips %}
+      <a class="chip {{ 'on' if state == c.key }}" href="{{ link(state=c.key, assign='') }}" {% if state == c.key %}aria-current="true"{% endif %}>{{ c.label }} <span class="n">{{ c.count }}</span></a>
+    {% endfor %}
+    {% if q %}<a class="chip" href="{{ link(q='') }}">Clear “{{ q }}”</a>{% endif %}
+  </div>
+
+  {{ flashes() }}
+
+  <div class="layout">
+    <div class="main-col card panel">
+      {% if prs %}
+      <div class="scroll">
+        <table style="min-width: 820px">
+          <thead><tr><th>Pull request</th><th>Author</th><th>State</th><th>Checks</th><th>Reviewers</th><th>Waiting</th><th><span class="sr-only">Action</span></th></tr></thead>
+          <tbody>
+          {% for p in prs %}
+            <tr class="{{ 'sel' if sel and sel.id == p.id }}">
+              <td><a class="pr-title" href="{{ p.url }}" target="_blank" rel="noopener">{{ p.title }}</a>
+                <div class="pr-sub">{{ p.ref }}{% if p.labels %} · {{ p.labels|join(', ') }}{% endif %}</div>
+                <div class="pr-sub">{{ p.head_ref }} → {{ p.base_ref }}</div></td>
+              <td class="nowrap sub">{{ p.author or '—' }}</td>
+              <td class="nowrap"><span class="badge {{ p.tone }}">{{ p.state_label }}</span></td>
+              <td class="nowrap"><span class="tone-{{ p.ci_tone }} dot" style="font-size: 13px; font-weight: 600">{{ p.ci_label }}</span></td>
+              <td>{% include "_marks.html" %}</td>
+              <td class="nowrap sub" title="Waiting on {{ p.waiting_on }}">{{ p.waiting }}<div class="pr-sub">on {{ p.waiting_on }}</div></td>
+              <td class="nowrap"><a class="btn small" href="{{ link(assign=p.id) }}#assign">{{ 'Reviewers' if can_act else 'Details' }}</a></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+        <div class="empty">{{ 'No pull requests match this filter.' if total else 'No open pull requests.' }}</div>
+      {% endif %}
+    </div>
+
+    {% if sel %}
+    <aside class="side-col" id="assign" aria-label="{{ 'Assign reviewers' if can_act else 'Pull request' }}">
+      <div class="card panel drawer">
+        <div class="panel-head">
+          <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+            <h2>{{ 'Assign reviewers' if can_act else 'Reviewers' }}</h2>
+            <span class="pr-sub" style="margin: 0">{{ sel.full_name }} #{{ sel.number }}</span>
+          </div>
+          <a class="icon-btn" href="{{ link(assign='') }}" aria-label="Close"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></a>
+        </div>
+        <div class="body">
+          <a class="pr-title" href="{{ sel.url }}" target="_blank" rel="noopener">{{ sel.title }}</a>
+          <div class="facts">
+            <div>Author<b>{{ sel.author or '—' }}</b></div>
+            <div>State<b>{{ sel.state_label }} · {{ sel.waiting }}</b></div>
+            <div>Changed<b class="mono">+{{ sel.additions }} −{{ sel.deletions }} · {{ sel.changed_files }} file{{ 's' if sel.changed_files != 1 }}</b></div>
+            <div>Requested now<b>{{ (sel.requested_users + sel.requested_teams)|join(', ') or 'nobody' }}</b></div>
+          </div>
+
+          {% if picker %}
+          <form method="post" action="{{ url_for('assign_reviewers', pr_id=sel.id, **request.args) }}" style="display: flex; flex-direction: column; gap: 18px">
+            {{ csrf() }}
+            {% if picker.error %}<p class="hint warn">{{ picker.error }}</p>{% endif %}
+            <div style="display: flex; flex-direction: column; gap: 8px">
+              <span class="eyebrow">Suggested</span>
+              {% for c in picker.suggested %}
+                <label class="pick">
+                  <input type="checkbox" name="who" value="{{ c.value }}" {{ 'checked' if c.checked }}>
+                  <input type="hidden" name="shown" value="{{ c.value }}">
+                  <span class="av{{ ' team' if c.team }}" aria-hidden="true">{{ c.login.split('/')[-1][:2]|upper }}</span>
+                  <span class="txt"><b>{{ c.name }}</b><small>{{ c.why }}</small></span>
+                  <span class="load">{{ c.load }}</span>
+                </label>
+              {% else %}
+                <p class="hint">No suggestions: nobody other than the author owns these files or has reviewed here recently.</p>
+              {% endfor %}
+            </div>
+            {% if picker.others %}
+            <div style="display: flex; flex-direction: column; gap: 8px">
+              <label class="eyebrow" for="find">Anyone else</label>
+              <input id="find" class="input" type="search" placeholder="Filter people and teams" autocomplete="off">
+              <div class="picklist" id="others">
+              {% for c in picker.others %}
+                <label class="pick" data-name="{{ c.login }} {{ c.name|lower }}">
+                  <input type="checkbox" name="who" value="{{ c.value }}" {{ 'checked' if c.checked }}>
+                  <input type="hidden" name="shown" value="{{ c.value }}">
+                  <span class="av{{ ' team' if c.team }}" aria-hidden="true">{{ c.login.split('/')[-1][:2]|upper }}</span>
+                  <span class="txt"><b>{{ c.name }}</b><small>{{ c.why }}</small></span>
+                  <span class="load">{{ c.load }}</span>
+                </label>
+              {% endfor %}
+              </div>
+            </div>
+            {% endif %}
+            <label class="check"><input type="checkbox" name="tell" value="1" checked> Tell the PR's channels</label>
+            <div class="actions">
+              <a class="btn" href="{{ link(assign='') }}">Cancel</a>
+              <button type="submit" class="btn primary">Update reviewers</button>
+            </div>
+            <p class="hint">Sent to GitHub as a review request (or its removal), through the GitHub App where it's installed, otherwise the token. Unticking someone who's requested now removes the request.</p>
+          </form>
+          {% elif not can_act %}
+          <div>{% set p = sel %}{% include "_marks.html" %}</div>
+          <p class="hint">Members and admins can request reviewers here.</p>
+          {% endif %}
+        </div>
+      </div>
+    </aside>
+    {% endif %}
+  </div>
+</main>
+{% endblock %}
+{% block scripts %}
+<script>
+  (function () {
+    var box = document.getElementById("find");
+    if (!box) return;
+    box.addEventListener("input", function () {
+      var q = box.value.trim().toLowerCase();
+      document.querySelectorAll("#others .pick").forEach(function (el) {
+        el.style.display = !q || el.dataset.name.indexOf(q) >= 0 ? "" : "none";
+      });
+    });
+  })();
+</script>
+{% endblock %}

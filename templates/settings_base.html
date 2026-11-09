@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="settings-wrap">
+  <nav class="settings-nav" aria-label="Settings">
+    <span class="eyebrow">Settings</span>
+    {% set ep = request.endpoint or '' %}
+    {% for endpoint, label, prefixes in [('admin.github', 'GitHub', ('admin.github', 'admin.target')),
+                                         ('admin.notifications', 'Channels and reminders', ('admin.notifications', 'admin.channel', 'admin.rule', 'admin.workhours')),
+                                         ('admin.people', 'People', ('admin.people',)),
+                                         ('admin.tls_page', 'TLS certificate', ('admin.tls',)),
+                                         ('admin.users', 'Users and access', ('admin.user',))] %}
+    <a href="{{ url_for(endpoint) }}" {% if ep.startswith(prefixes) %}class="current" aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </nav>
+  <main class="settings-main">
+    {% block heading %}{% endblock %}
+    {{ flashes() }}
+    {% block content %}{% endblock %}
+  </main>
+</div>
+{% endblock %}
