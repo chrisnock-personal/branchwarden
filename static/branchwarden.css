@@ -343,3 +343,10 @@ header.top { column-gap: 20px; }
 nav.sections a { padding: 10px 12px; }
 @media (min-width: 900px) { header.top .tools .search { min-width: 90px; } }
 @media (min-width: 900px) { header.top .tools { flex: 1 1 0; min-width: 0; } }
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 24px; }
+.mbars { display: flex; align-items: flex-end; gap: 2px; height: 120px; border-bottom: 1px solid var(--border); }
+.mbars .col { flex: 1; height: 100%; display: flex; align-items: flex-end; cursor: default; }
+.mbars .fill { width: 100%; background: var(--bar); border-radius: 4px 4px 0 0; }
+.mbars .col:hover .fill { background: var(--accent); }
+.tableview summary { cursor: pointer; font-size: 13px; color: var(--text2); min-height: 32px; display: flex; align-items: center; }
+.tableview table { margin-top: 8px; }

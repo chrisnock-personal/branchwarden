@@ -61,6 +61,7 @@ PR_FIELDS = """
   reviewRequests(first: 20) { nodes { requestedReviewer {
     __typename ... on User { login } ... on Team { combinedSlug } ... on Bot { login } ... on Mannequin { login } } } }
   latestReviews(first: 30) { nodes { author { login } state submittedAt } }
+  firstReviews: reviews(first: 10, states: [APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED]) { nodes { submittedAt author { login } } }
   commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state } } } }
   timelineItems(last: 20, itemTypes: [READY_FOR_REVIEW_EVENT, REVIEW_REQUESTED_EVENT]) { nodes {
     __typename ... on ReadyForReviewEvent { createdAt } ... on ReviewRequestedEvent { createdAt } } }
@@ -103,7 +104,9 @@ query($owner: String!, $name: String!, $after: String{', $base: String!' if comp
 
 
 def _ended_query(numbers: list[int]) -> str:
-    parts = " ".join(f"p{n}: pullRequest(number: {int(n)}) {{ state mergedAt closedAt mergedBy {{ login }} }}"
+    fr = "firstReviews: reviews(first: 10, states: [APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED]) " \
+         "{ nodes { submittedAt author { login } } } author { login }"
+    parts = " ".join(f"p{n}: pullRequest(number: {int(n)}) {{ state mergedAt closedAt mergedBy {{ login }} {fr} }}"
                      for n in numbers)
     return f"query($owner: String!, $name: String!) {{ repository(owner: $owner, name: $name) {{ {parts} }} {RATE} }}"
 
@@ -112,6 +115,14 @@ def _ended_query(numbers: list[int]) -> str:
 
 def _login(obj) -> Optional[str]:
     return (obj or {}).get("login", "").lower() or None
+
+
+def first_review(node: dict) -> Optional[str]:
+    """When someone other than the author first reviewed (authors' replies count as reviews on GitHub)."""
+    author = _login(node.get("author"))
+    times = [r["submittedAt"] for r in (node.get("firstReviews") or {}).get("nodes") or []
+             if r and r.get("submittedAt") and _login(r.get("author")) != author]
+    return min(times) if times else None
 
 
 def pr_from_node(node: dict) -> dict:
@@ -155,6 +166,7 @@ def pr_from_node(node: dict) -> dict:
         "last_commit_at": commit.get("committedDate"),
         "merged_at": node.get("mergedAt"), "merged_by": _login(node.get("mergedBy")),
         "closed_at": node.get("closedAt"),
+        "first_review_at": first_review(node),
     }
 
 
@@ -259,7 +271,7 @@ def fetch_ended(client: Client, owner: str, name: str, numbers: list[int]) -> di
 PR_COLUMNS = ("title", "url", "author", "state", "draft", "head_ref", "head_oid", "base_ref",
               "review_decision", "mergeable", "ci_state", "additions", "deletions", "changed_files",
               "files", "labels", "requested", "reviews", "created_at", "updated_at", "ready_at",
-              "review_requested_at", "last_commit_at", "merged_at", "merged_by", "closed_at")
+              "review_requested_at", "last_commit_at", "merged_at", "merged_by", "closed_at", "first_review_at")
 JSON_COLUMNS = {"files", "labels", "requested", "reviews"}
 
 BRANCH_COLUMNS = ("head_oid", "last_commit_at", "last_committer", "protected", "ahead", "behind",
@@ -330,9 +342,10 @@ def scan_repo(conn, client: Client, repo: dict) -> tuple[list[dict], int, int]:
             if state == "open":      # still open: outside the page we read, leave it be
                 continue
             db.execute(conn, """UPDATE pull_requests SET state = %s, merged_at = %s, merged_by = %s,
-                                       closed_at = %s, seen_at = NOW() WHERE id = %s""",
+                                       closed_at = %s, first_review_at = COALESCE(first_review_at, %s),
+                                       seen_at = NOW() WHERE id = %s""",
                        (state, info.get("mergedAt"), _login(info.get("mergedBy")),
-                        info.get("closedAt") or datetime.now(timezone.utc), before[n]["id"]))
+                        info.get("closedAt") or datetime.now(timezone.utc), first_review(info), before[n]["id"]))
             if not first:
                 events.append({"kind": state, "pr_id": before[n]["id"]})
 

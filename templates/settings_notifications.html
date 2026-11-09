@@ -18,11 +18,15 @@
   <form class="card channel-card open" id="new" method="post" action="{{ url_for('admin.channel_new') }}">
     {{ csrf() }}<input type="hidden" name="kind" value="{{ kind }}">
     <div class="row-head"><span class="ic" aria-hidden="true">{{ 'T' if kind == 'teams' else 'S' }}</span><div class="title"><strong>New {{ 'Teams' if kind == 'teams' else 'Slack' }} channel</strong>
-      <span>{% if kind == 'teams' %}In Teams: channel ⋯ › Workflows › “Post to a channel when a webhook request is received”, then copy its URL.{% else %}In Slack: create an app › Incoming Webhooks › Add New Webhook to Workspace, pick the channel, copy the URL.{% endif %}</span></div></div>
+      <span>{% if kind == 'teams' %}In Teams: channel ⋯ › Workflows › “Post to a channel when a webhook request is received”, then copy its URL.{% else %}In Slack: create an app, then either Incoming Webhooks › Add New Webhook (simplest), or give it the chat:write scope, install it, and invite it to the channel for threads.{% endif %}</span></div></div>
     <div class="editor">
       <div class="form-grid">
         <div class="field"><label for="n-name">Name</label><input class="input" id="n-name" name="name" placeholder="{{ 'Platform reviews' if kind == 'teams' else '#web-team' }}" required></div>
-        <div class="field"><label for="n-url">Webhook URL</label><input class="input mono" id="n-url" name="url" type="password" autocomplete="off" required placeholder="https://…"><span class="help">Encrypted here and never shown again.</span></div>
+        <div class="field"><label for="n-url">Webhook URL</label><input class="input mono" id="n-url" name="url" type="password" autocomplete="off" {{ 'required' if kind == 'teams' }} placeholder="https://…"><span class="help">Encrypted here and never shown again.</span></div>
+        {% if kind == 'slack' %}
+        <div class="field"><label for="n-token">…or a bot token, for threads</label><input class="input mono" id="n-token" name="bot_token" type="password" autocomplete="off" placeholder="xoxb-…"><span class="help">Each PR's messages then stay in one thread; merges and closes also show in the channel.</span></div>
+        <div class="field"><label for="n-chan">Slack channel ID (with a bot token)</label><input class="input mono" id="n-chan" name="slack_channel" placeholder="C01ABCDEF23"></div>
+        {% endif %}
         <div class="field"><label for="n-repos">Repos</label><input class="input mono" id="n-repos" name="repos" placeholder="api-*, my-org/web-console"></div>
         <div class="field"><label for="n-teams">Teams</label><input class="input mono" id="n-teams" name="teams" placeholder="my-org/platform"><span class="help">A PR matches when one of these teams is asked to review it.</span></div>
       </div>
@@ -36,7 +40,7 @@
   <div class="card channel-card {{ 'open' if is_open }}" id="ch-{{ c.id }}">
     <div class="row-head">
       <span class="ic" aria-hidden="true">{{ 'T' if c.kind == 'teams' else 'S' }}</span>
-      <div class="title"><strong>{{ c.kind_label }} · {{ c.name }}</strong><span>{{ 'Workflows webhook · Adaptive Card' if c.kind == 'teams' else 'Incoming webhook · Block Kit' }} · {{ c.routes }}</span></div>
+      <div class="title"><strong>{{ c.kind_label }} · {{ c.name }}</strong><span>{{ 'Workflows webhook · Adaptive Card' if c.kind == 'teams' else ('Bot token · threads per PR · ' ~ c.slack_channel if c.bot else 'Incoming webhook · Block Kit') }} · {{ c.routes }}</span></div>
       <span class="badge {{ c.tone }}" title="{{ c.detail }}">{{ c.status }}{% if c.status == 'ok' %} · {{ c.sent_24h }} today{% endif %}</span>
       {% if is_open %}<a class="btn small" href="{{ url_for('admin.notifications') }}#ch-{{ c.id }}">Close</a>{% else %}<a class="btn small" href="{{ url_for('admin.notifications', open=c.id) }}#ch-{{ c.id }}">Edit</a>{% endif %}
       <form method="post" action="{{ url_for('admin.channel_save', cid=c.id) }}" class="inline">{{ csrf() }}<input type="hidden" name="toggle" value="1">
@@ -51,7 +55,13 @@
           <div class="field"><label for="c-name">Name</label><input class="input" id="c-name" name="name" value="{{ c.name }}"></div>
           <div class="field"><label for="c-url">Webhook URL</label>
             {% if c.stored %}<div class="stored"><span><strong>Stored</strong> · {{ c.url_host }} · {{ c.stored }}</span></div>{% endif %}
-            <input class="input mono" id="c-url" name="url" type="password" autocomplete="off" placeholder="Paste a new URL to replace it"></div>
+            <input class="input mono" id="c-url" name="url" type="password" autocomplete="off" placeholder="{{ 'Paste a new URL to replace it' if c.stored else 'https://…' }}"></div>
+          {% if c.kind == 'slack' %}
+          <div class="field"><label for="c-token">…or a bot token, for threads</label>
+            {% if c.bot_stored %}<div class="stored"><span><strong>Stored</strong> · {{ c.bot_stored }}</span></div>{% endif %}
+            <input class="input mono" id="c-token" name="bot_token" type="password" autocomplete="off" placeholder="xoxb-…"></div>
+          <div class="field"><label for="c-chan">Slack channel ID</label><input class="input mono" id="c-chan" name="slack_channel" value="{{ c.slack_channel }}" placeholder="C01ABCDEF23"></div>
+          {% endif %}
           <div class="field"><label for="c-repos">Repos</label><input class="input mono" id="c-repos" name="repos" value="{{ c.repos }}" placeholder="every repo"></div>
           <div class="field"><label for="c-teams">Teams</label><input class="input mono" id="c-teams" name="teams" value="{{ c.teams }}" placeholder="my-org/platform"></div>
         </div>
@@ -95,7 +105,7 @@
   <div class="card channel-card {{ 'open' if is_open }}" id="rule-{{ r.key }}">
     <div class="row-head">
       <div class="title"><strong>{{ r.name }}</strong><span>{{ r.desc }}</span></div>
-      <div class="acts"><span class="badge {{ {'event': 'info', 'reminder': 'warn', 'digest': 'muted'}[r.kind] }}">{{ r.kind|capitalize }}</span><span class="badge muted">{{ r.to }}</span></div>
+      <div class="acts"><span class="badge {{ {'event': 'info', 'assign': 'good', 'reminder': 'warn', 'digest': 'muted'}[r.kind] }}">{{ {'assign': 'Action'}.get(r.kind, r.kind|capitalize) }}</span><span class="badge muted">{{ r.to }}</span></div>
       {% if is_open %}<a class="btn small" href="{{ url_for('admin.notifications') }}#rule-{{ r.key }}">Close</a>{% else %}<a class="btn small" href="{{ url_for('admin.notifications', open=r.key) }}#rule-{{ r.key }}">Edit</a>{% endif %}
       <form method="post" action="{{ url_for('admin.rule_save', key=r.key) }}" class="inline">{{ csrf() }}<input type="hidden" name="toggle" value="1">
         <button type="submit" class="switch" aria-pressed="{{ 'true' if r.enabled else 'false' }}" aria-label="{{ r.name }} switched {{ 'on' if r.enabled else 'off' }}"></button></form>
@@ -111,6 +121,16 @@
         <label class="check"><input type="checkbox" name="mention" value="1" {{ 'checked' if p.mention }}> @mention {{ 'the requested reviewers' if r.key == 'waiting' else 'the author' }}</label>
         <div class="inline-form">Skip PRs labelled <input class="input mono" name="skip_label" value="{{ p.skip_label }}" style="width: 200px" aria-label="Skip label"> (drafts are always skipped)</div>
         <label class="check"><input type="checkbox" name="group" value="1" {{ 'checked' if p.group }}> One message per channel listing every PR, instead of one per PR</label>
+      {% elif r.kind == 'assign' %}
+        <div class="inline-form">When nobody has been asked to review a PR for <input class="input num" name="after" value="{{ p.after }}" aria-label="Wait"> <select name="unit" aria-label="Unit">{% for u, label in units %}<option value="{{ u }}" {{ 'selected' if p.unit == u }}>{{ label }}</option>{% endfor %}</select>,</div>
+        <div class="inline-form">request <input class="input num" name="count" value="{{ p.count }}" aria-label="How many reviewers"> reviewer(s) on GitHub, picking</div>
+        <label class="check"><input type="checkbox" name="codeowners" value="1" {{ 'checked' if p.codeowners }}> code owners of the changed files first</label>
+        <div class="inline-form">then the least busy of <input class="input mono" name="pool" value="{{ p.pool }}" placeholder="recent reviewers in the repo" style="width: 320px" aria-label="Reviewer pool"></div>
+        <p class="hint">The pool takes logins and org/team slugs (a team's members are each candidates). Least busy means fewest open review requests now, then fewest assignments in the last 14 days. The author is never picked.</p>
+        <div class="inline-form">Only in repos matching <input class="input mono" name="repos" value="{{ p.repos }}" placeholder="every repo" style="width: 260px" aria-label="Repos"> · skip PRs labelled <input class="input mono" name="skip_label" value="{{ p.skip_label }}" style="width: 180px" aria-label="Skip label"></div>
+        <div class="inline-form">Tell <select name="target" aria-label="Where">{% include "_targets.html" %}</select></div>
+        <label class="check"><input type="checkbox" name="mention" value="1" {{ 'checked' if p.mention }}> @mention who was picked</label>
+        <p class="hint">Runs in working hours only, once each time a PR is left without a reviewer. It writes to GitHub, so it's off until you switch it on.</p>
       {% elif r.kind == 'digest' %}
         <div class="inline-form">Every <select name="day" aria-label="Day">{% for d in days %}<option value="{{ d }}" {{ 'selected' if p.day == d }}>{{ d|capitalize }}day</option>{% endfor %}</select>
           at <input class="input num" name="time" value="{{ p.time }}" aria-label="Time"> (working-hours time zone), to <select name="target" aria-label="Where">{% include "_targets.html" %}</select></div>

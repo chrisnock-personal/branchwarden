@@ -12,7 +12,11 @@ organisation or account:
 - **Branches:** those with no PR that have gone stale, and those left behind by
   PRs that were merged or closed.
 - **Reviewers:** request reviewers from the dashboard, with suggestions drawn
-  from CODEOWNERS and who has reviewed in that repo recently.
+  from CODEOWNERS and who has reviewed in that repo recently. An optional rule
+  assigns one automatically when nobody has been asked: code owners first, then
+  the least busy person in a pool.
+- **Metrics:** time to first review, time to merge, merges per week, and daily
+  trends of PRs needing review and stale branches, per repo or overall.
 - **Notifications:** posted to Microsoft Teams (Workflows webhooks, Adaptive Cards) and
   Slack (incoming webhooks, Block Kit) when PRs open, are reviewed, merge or
   close. Reminders go out in working hours, plus a weekly digest of branches to tidy up.
@@ -113,7 +117,11 @@ GitHub Enterprise Server works too: set the API address to `https://host/api/v3`
   against a PR's requested team reviewers). A channel with neither gets everything.
   - **Teams:** use the *“Post to a channel when a webhook request is received”*
     workflow. The older Office 365 connectors are retired.
-  - **Slack:** use an incoming webhook.
+  - **Slack:** use an incoming webhook, or for **threads**, a bot token
+    (`chat:write`, with the bot invited to the channel) and the channel ID. With
+    a bot token, each PR's messages stay in one thread. Merges and closes are
+    also shown in the channel, and the digest is posted on its own.
+    Teams webhooks can't reply in a thread, so Teams channels get one card per message.
 - **Event rules:**
   - PR opened, or marked ready for review
   - Review submitted (approved, or changes requested)
@@ -128,7 +136,17 @@ GitHub Enterprise Server works too: set the API address to `https://host/api/v3`
   channels, @mentions, a skip label, and an option to group PRs into one
   message per channel. Reminders only go out in working hours (days, times and
   time zone are set on the same page). A reminder starts afresh if the PR
-  leaves that state and comes back.
+  leaves that state and comes back. Every reminder has a **Snooze** button that
+  opens the PR in Branchwarden, where a member can put its reminders off for
+  1, 3 or 7 days.
+- **Auto-assign reviewers** (off by default, as it writes to GitHub): when a PR
+  has had nobody asked for a set time, Branchwarden requests a reviewer.
+  - **Who:** code owners of the changed files first, then the least busy
+    person in a pool of logins and teams (or recent reviewers in the repo). The
+    least busy has the fewest open review requests, then the fewest assignments
+    in the last 14 days. The author is never picked.
+  - **When:** in working hours only, and once each time a PR is left without a reviewer.
+  - The channel is told who was picked and why.
 - **Weekly digest:** stale branches and branches left behind, per channel's
   repos, with each branch's last committer @mentioned.
 
@@ -141,11 +159,22 @@ appears as a bold name.
 | Role | Can |
 |---|---|
 | Admin | Everything: GitHub connections, channels and rules, people, the TLS certificate, users |
-| Member | Read everything, request reviewers, ignore branches, start a scan |
+| Member | Read everything, request reviewers, snooze reminders, ignore branches, start a scan |
 | Viewer | Read the overview, pull requests, branches and deliveries |
 
 People are added under *Settings › Users and access*. Each gets a one-time setup
 link that lasts 24 hours. Branchwarden doesn't send email, so you pass the link on.
+
+**Sign in with GitHub** can replace those links.
+- **Setup:** register an OAuth App (or use the GitHub App's own client ID and
+  secret) with the callback URL shown on that page. Then list who gets each
+  role: logins, `org/team` slugs or whole organisations.
+- **Roles:** each person's role is worked out from their GitHub teams every
+  time they sign in. Anyone matching no list is turned away, so having a
+  GitHub account isn't enough.
+- **Tokens:** sign-in uses PKCE and a state check. The GitHub token is only
+  used to read the person's teams, and is never stored.
+- **Fallback:** local accounts keep working, so an admin can always get in.
 
 ## Security
 
@@ -182,6 +211,10 @@ of all repos:
   Errors never echo a webhook URL, since the URL is the secret.
 - **CI** runs the tests, `pip-audit` and `gitleaks` on every push.
 
+**Retention:** closed PRs are kept for 365 days, for the metrics. Messages and
+scans are kept for 90 days. Both are set under *Settings › GitHub*, and older
+records are removed once an hour.
+
 **Not covered yet:** the Postgres volume itself isn't encrypted. Run it on an
 encrypted disk if PR titles and branch names are sensitive. Back up the `keys`
 volume with the database: without it, stored secrets can't be read.
@@ -210,10 +243,12 @@ The files:
 
 | File | What it does |
 |---|---|
-| `analysis.py` | PR states, branch statuses, CODEOWNERS and working-hours maths. No I/O |
+| `analysis.py` | PR states, branch statuses, CODEOWNERS, picking reviewers and working-hours maths. No I/O |
 | `scanner.py` | The GraphQL queries and turning a scan into rows and events |
-| `rules.py` | Events, reminders and the digest |
-| `notify.py` | Routing, rendering for Teams and Slack, and delivery |
+| `rules.py` | Events, auto-assign, reminders and the digest |
+| `metrics.py`, `housekeeping.py` | The metrics page; retention and the daily snapshot |
+| `ghlogin.py` | Sign in with GitHub |
+| `notify.py` | Routing, rendering for Teams and Slack, delivery and Slack threads |
 | `github.py` | App and token clients |
 | `settings.py` | Encrypted settings, users and history |
 | `tls.py` | Certificates |

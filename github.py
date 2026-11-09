@@ -48,6 +48,14 @@ def graphql_url(api_url: str) -> str:
     return api + "/graphql"
 
 
+def web_url(api_url: str) -> str:
+    """github.com, or a GitHub Enterprise Server's own address, from its API address."""
+    api = api_url.rstrip("/")
+    if api in ("https://api.github.com", ""):
+        return "https://github.com"
+    return api[: -len("/api/v3")] if api.endswith("/api/v3") else api
+
+
 def verify_signature(secret: str, body: bytes, header: str) -> bool:
     """Check a webhook's X-Hub-Signature-256 header."""
     if not secret or not header or not header.startswith("sha256="):
@@ -156,6 +164,10 @@ class Client:
     def org_teams(self, org: str) -> list[dict]:
         return [{"slug": f"{org}/{t['slug']}".lower(), "name": t.get("name") or t["slug"]}
                 for t in self.paged(f"/orgs/{org}/teams")]
+
+    def team_members(self, team_slug: str) -> list[str]:
+        org, _, slug = team_slug.partition("/")
+        return sorted(m["login"].lower() for m in self.paged(f"/orgs/{org}/teams/{slug}/members"))
 
     def collaborators(self, full_name: str) -> list[str]:
         return sorted(m["login"].lower() for m in self.paged(f"/repos/{full_name}/collaborators"))

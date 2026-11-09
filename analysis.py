@@ -332,3 +332,24 @@ def ago(when: Optional[datetime], now: Optional[datetime] = None) -> str:
     if seconds < 48 * 3600:
         return f"{int(seconds // 3600)} h"
     return f"{int(seconds // 86400)} days"
+
+
+# ─── Picking reviewers ──────────────────────────────────────────────────────
+
+def choose_reviewers(groups: list[tuple[str, list[str]]], *, count: int, exclude: set,
+                     load: dict, recent: dict) -> list[tuple[str, str]]:
+    """Pick `count` people, taking each group in turn (code owners first, then
+    the pool). Within a group, the least busy wins: fewest open review requests,
+    then fewest recent assignments, then name order so the choice is stable.
+    Returns [(login, why)]."""
+    picked: list[tuple[str, str]] = []
+    taken = set(exclude)
+    for why, people in groups:
+        ranked = sorted({p.lower() for p in people if p and p.lower() not in taken},
+                        key=lambda p: (load.get(p, 0), recent.get(p, 0), p))
+        for p in ranked:
+            if len(picked) >= count:
+                return picked
+            picked.append((p, why))
+            taken.add(p)
+    return picked

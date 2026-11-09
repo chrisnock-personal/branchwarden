@@ -220,17 +220,70 @@ def post(url: str, payload: dict) -> None:
         raise PermanentFailure(f"HTTP {resp.status_code}" + (f": {detail}" if detail else ""))
 
 
-def send(conn, channel: dict, message: dict, people: Optional[dict] = None) -> None:
-    url = settings.load(conn).get(settings.channel_url_key(channel["id"]))
+SLACK_API = "https://slack.com/api/chat.postMessage"
+# Slack API errors worth trying again; anything else is a setup problem.
+SLACK_RETRY = {"ratelimited", "service_unavailable", "fatal_error", "internal_error", "request_timeout"}
+# Events also shown in the channel, not only inside the PR's thread.
+BROADCAST = {"merged", "closed"}
+
+
+def slack_api_post(token: str, payload: dict) -> str:
+    """Post through chat.postMessage; returns the message's ts."""
+    try:
+        resp = requests.post(SLACK_API, json=payload, timeout=TIMEOUT,
+                             headers={"Authorization": f"Bearer {token}"})
+    except requests.RequestException as exc:
+        raise RetryLater(f"can't connect ({type(exc).__name__})") from None
+    if resp.status_code == 429 or resp.status_code >= 500:
+        raise RetryLater(f"HTTP {resp.status_code}")
+    try:
+        body = resp.json()
+    except ValueError:
+        raise PermanentFailure(f"HTTP {resp.status_code}: not a Slack API answer") from None
+    if not body.get("ok"):
+        error = body.get("error", "unknown error")
+        if error in SLACK_RETRY:
+            raise RetryLater(f"Slack: {error}")
+        raise PermanentFailure(f"Slack: {error}")
+    return body.get("ts", "")
+
+
+def dispatch(conn, values: dict, channel: dict, message: dict, people: dict, *,
+             kind: str = "", pr_id: Optional[int] = None) -> None:
+    """Send one message to one channel. A Slack channel with a bot token posts
+    through the API, keeping each PR's messages in one thread; everything
+    else goes to the channel's webhook."""
+    cid = channel["id"]
+    token = values.get(settings.channel_token_key(cid))
+    if channel["kind"] == "slack" and token and channel.get("slack_channel"):
+        payload = {**slack_message(message, people), "channel": channel["slack_channel"],
+                   "unfurl_links": False, "unfurl_media": False}
+        thread = None
+        if pr_id and kind != "digest":
+            row = db.one(conn, "SELECT ts FROM threads WHERE channel_id = %s AND pr_id = %s", (cid, pr_id))
+            thread = row["ts"] if row else None
+        if thread:
+            payload["thread_ts"] = thread
+            payload["reply_broadcast"] = kind in BROADCAST
+        ts = slack_api_post(token, payload)
+        if pr_id and not thread and ts and kind != "digest":
+            db.execute(conn, """INSERT INTO threads (channel_id, pr_id, ts) VALUES (%s, %s, %s)
+                                ON CONFLICT DO NOTHING""", (cid, pr_id, ts))
+        return
+    url = values.get(settings.channel_url_key(cid))
     if not url:
-        raise PermanentFailure("no webhook URL is set")
-    post(url, render(channel["kind"], message, people if people is not None else _people(conn)))
+        raise PermanentFailure("no webhook URL or bot token is set")
+    post(url, render(channel["kind"], message, people))
+
+
+def send(conn, channel: dict, message: dict, people: Optional[dict] = None) -> None:
+    dispatch(conn, settings.load(conn), channel, message, people if people is not None else _people(conn))
 
 
 def deliver(conn, limit: int = 50) -> tuple[int, int]:
     """Send what's due; returns (sent, failed)."""
     due = db.rows(conn, """
-        SELECT n.*, c.kind AS channel_kind, c.enabled AS channel_enabled
+        SELECT n.*, c.kind AS channel_kind, c.enabled AS channel_enabled, c.slack_channel
           FROM notifications n JOIN channels c ON c.id = n.channel_id
          WHERE n.status = 'pending' AND n.next_attempt_at <= NOW()
          ORDER BY n.id LIMIT %s FOR UPDATE OF n SKIP LOCKED""", (limit,))
@@ -240,13 +293,11 @@ def deliver(conn, limit: int = 50) -> tuple[int, int]:
     people = _people(conn)
     sent = failed = 0
     for n in due:
-        url = values.get(settings.channel_url_key(n["channel_id"]))
+        channel = {"id": n["channel_id"], "kind": n["channel_kind"], "slack_channel": n["slack_channel"]}
         try:
             if not n["channel_enabled"]:
                 raise PermanentFailure("the channel is switched off")
-            if not url:
-                raise PermanentFailure("no webhook URL is set")
-            post(url, render(n["channel_kind"], n["payload"], people))
+            dispatch(conn, values, channel, n["payload"], people, kind=n["kind"], pr_id=n["pr_id"])
         except RetryLater as exc:
             step = n["attempts"]
             if step >= len(RETRY_STEPS):

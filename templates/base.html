@@ -38,6 +38,7 @@
     <a href="{{ url_for('index') }}" {% if ep == 'index' %}class="current" aria-current="page"{% endif %}>Overview</a>
     <a href="{{ url_for('pulls') }}" {% if ep == 'pulls' %}class="current" aria-current="page"{% endif %}>Pull requests</a>
     <a href="{{ url_for('branches') }}" {% if ep == 'branches' %}class="current" aria-current="page"{% endif %}>Branches</a>
+    <a href="{{ url_for('metrics_page') }}" {% if ep == 'metrics_page' %}class="current" aria-current="page"{% endif %}>Metrics</a>
     <a href="{{ url_for('deliveries') }}" {% if ep == 'deliveries' %}class="current" aria-current="page"{% endif %}>Deliveries</a>
     {% if current_user and current_user.role == 'admin' %}
     <a href="{{ url_for('admin.github') }}" {% if request.blueprint == 'admin' %}class="current" aria-current="page"{% endif %}>Settings</a>
@@ -47,7 +48,7 @@
     <form class="search" method="get" action="{{ url_for('branches') if ep == 'branches' else url_for('pulls') }}" role="search">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="color: var(--muted)"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
       <label for="q" class="sr-only">Search</label>
-      <input id="q" type="search" name="q" value="{{ q or '' }}" placeholder="{{ 'Search branches, repos, people…' if ep == 'branches' else 'Search PRs, branches, people…' }}">
+      <input id="q" type="search" name="q" value="{{ q or '' }}" placeholder="Search…" title="{{ 'Search branches, repos and people' if ep == 'branches' else 'Search pull requests, branches and people' }}">
     </form>
     {{ theme_button() }}
     {% if current_user %}

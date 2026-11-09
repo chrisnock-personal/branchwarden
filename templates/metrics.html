@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Metrics · Branchwarden{% endblock %}
+{% macro chart(title, sub, points, unit, id) %}
+<section class="card panel" aria-labelledby="{{ id }}-h">
+  <div class="panel-head"><div><h2 id="{{ id }}-h">{{ title }}</h2><p class="hint" style="margin-top: 2px">{{ sub }}</p></div></div>
+  <div class="poll-body">
+    {% if points and points|selectattr('value')|list %}
+    <div class="mbars" role="img" aria-label="{{ title }}: {{ points|length }} bars; the table below has the values">
+      {% for b in points %}<div class="col" title="{{ b.tip }}"><div class="fill" style="height: {{ b.height }}%"></div></div>{% endfor %}
+    </div>
+    <div class="poll-axis"><span>{{ points[0].label }}</span><span>{{ points[-1].label }}</span></div>
+    <details class="tableview"><summary>Show as a table</summary>
+      <table><thead><tr><th>When</th><th style="text-align: right">{{ unit }}</th></tr></thead>
+      <tbody>{% for b in points %}<tr><td class="sub">{{ b.label }}</td><td class="sub" style="text-align: right">{{ b.tip.split(': ', 1)[1] }}</td></tr>{% endfor %}</tbody></table>
+    </details>
+    {% else %}<div class="empty">Nothing yet for this period.</div>{% endif %}
+  </div>
+</section>
+{% endmacro %}
+{% block body %}
+<main>
+  <div class="page-head">
+    <div>
+      <h1>Metrics</h1>
+      <p>How reviews are going{% if repo %} in {{ repo }}{% endif %}: times count from when a PR was ready for review, in clock hours</p>
+    </div>
+    <div class="filters">
+      <div class="seg" role="group" aria-label="Period">
+        {% for d, label in periods %}<a class="{{ 'on' if days == d }}" href="{{ link(days=d) }}" {% if days == d %}aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}
+      </div>
+      <form method="get" action="{{ url_for('metrics_page') }}">
+        <input type="hidden" name="days" value="{{ days }}">
+        <label for="repo" class="sr-only">Repository</label>
+        <select id="repo" name="repo" data-autosubmit>
+          <option value="">All repositories</option>
+          {% for r in repos %}<option value="{{ r.full_name }}" {{ 'selected' if repo == r.full_name }}>{{ r.name }}</option>{% endfor %}
+        </select>
+        <noscript><button class="btn small" type="submit">Apply</button></noscript>
+      </form>
+    </div>
+  </div>
+
+  <section class="kpis" aria-label="Summary">
+    {% for t in m.tiles %}
+    <div class="card kpi"><div class="label">{{ t.label }}</div><div class="row"><span class="value">{{ t.value }}</span></div><span class="note">{{ t.note }}</span></div>
+    {% endfor %}
+  </section>
+
+  <div class="charts">
+    {{ chart('Merged per week', 'Pull requests merged each week', m.merged_bars, 'Merged', 'mw') }}
+    {{ chart('Time to first review', 'Median per week, by when the review came', m.first_bars, 'Median', 'fr') }}
+    {{ chart('Needing review', 'Open PRs waiting for a review, each day', m.review_bars, 'Needing review', 'nr') }}
+    {{ chart('Stale branches', 'Branches with no PR and no recent commits, each day', m.stale_bars, 'Stale', 'sb') }}
+  </div>
+
+  <section class="health">
+    <div class="card panel">
+      <div class="panel-head"><h2>By repository</h2><span class="hint">last {{ days }} days</span></div>
+      {% if m.repos %}
+      <div class="scroll"><table style="min-width: 520px">
+        <thead><tr><th>Repository</th><th style="text-align: right">Reviewed</th><th style="text-align: right">First review</th><th style="text-align: right">Merged</th><th style="text-align: right">To merge</th></tr></thead>
+        <tbody>{% for r in m.repos %}<tr>
+          <td><a class="pr-title" href="{{ link(repo=r.full_name) }}">{{ r.name }}</a></td>
+          <td class="sub" style="text-align: right">{{ r.reviewed }}</td><td class="sub" style="text-align: right">{{ r.first }}</td>
+          <td class="sub" style="text-align: right">{{ r.merged }}</td><td class="sub" style="text-align: right">{{ r.merge }}</td>
+        </tr>{% endfor %}</tbody>
+      </table></div>
+      {% else %}<div class="empty">No reviews or merges in this period.</div>{% endif %}
+    </div>
+    <div class="card panel">
+      <div class="panel-head"><h2>Waiting on reviewers now</h2>
+        <span class="hint">{{ m.assignments.total }} assigned in {{ days }} days{% if m.assignments.auto %}, {{ m.assignments.auto }} automatically{% endif %}</span></div>
+      {% if m.reviewers %}
+      <div class="scroll"><table>
+        <thead><tr><th>Reviewer</th><th style="text-align: right">Open requests</th><th>Oldest</th></tr></thead>
+        <tbody>{% for r in m.reviewers %}<tr>
+          <td class="mono" style="font-size: 13px">{{ r.login }}</td><td class="sub" style="text-align: right">{{ r.waiting }}</td><td class="sub">{{ r.oldest|ago }}</td>
+        </tr>{% endfor %}</tbody>
+      </table></div>
+      {% else %}<div class="empty">Nobody has a review waiting.</div>{% endif %}
+    </div>
+  </section>
+  <footer><span>From PRs Branchwarden has seen; history before it started watching an account isn't counted.</span><span></span></footer>
+</main>
+{% endblock %}

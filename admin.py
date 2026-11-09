@@ -26,6 +26,8 @@ from psycopg2.extras import Json
 
 import analysis
 import db
+import ghlogin
+from metrics import compact as metrics_compact
 import notify
 import rules
 import settings
@@ -36,7 +38,7 @@ log = logging.getLogger("branchwarden.dashboard")
 
 bp = Blueprint("admin", __name__)
 
-OPEN_ENDPOINTS = {"admin.login", "admin.setup", "admin.welcome"}
+OPEN_ENDPOINTS = {"admin.login", "admin.setup", "admin.welcome", "admin.github_login", "admin.github_callback"}
 ALWAYS_OPEN = {"static", "healthz", "github_webhook"}
 
 _setup_code: list[str] = []
@@ -133,7 +135,71 @@ def login():
                 return redirect(nxt)
             _failures[key].append(time.monotonic())
             error = "That email and password don't match an account."
-    return render_template("login.html", error=error, email=email, next=nxt)
+    with db.get_conn() as conn:
+        github_on = _github_login_ready(settings.load(conn))
+    return render_template("login.html", error=error or request.args.get("error"), email=email, next=nxt,
+                           github_on=github_on)
+
+
+# ─── Sign in with GitHub ────────────────────────────────────────────────────
+
+def _github_login_ready(values: dict) -> bool:
+    return settings.flag(values, "GITHUB_LOGIN_ENABLED") and bool(values.get("GITHUB_OAUTH_CLIENT_ID")) \
+        and bool(values.get("GITHUB_OAUTH_CLIENT_SECRET"))
+
+
+def _callback_url(values: dict) -> str:
+    base = settings.get(values, "PUBLIC_URL").rstrip("/") or request.url_root.rstrip("/")
+    return base + url_for("admin.github_callback")
+
+
+@bp.get("/login/github")
+def github_login():
+    with db.get_conn() as conn:
+        values = settings.load(conn)
+    if not _github_login_ready(values):
+        abort(404)
+    verifier, challenge = ghlogin.pkce_pair()
+    state = secrets.token_urlsafe(24)
+    session["gh_oauth"] = {"state": state, "verifier": verifier, "next": _safe_next(request.args.get("next"))}
+    return redirect(ghlogin.authorize_url(settings.get(values, "GITHUB_API_URL"), values["GITHUB_OAUTH_CLIENT_ID"],
+                                          _callback_url(values), state, challenge))
+
+
+@bp.get("/login/github/callback")
+def github_callback():
+    pending = session.pop("gh_oauth", None)
+    with db.get_conn() as conn:
+        values = settings.load(conn)
+    if not _github_login_ready(values) or not pending:
+        return redirect(url_for("admin.login", error="That sign-in has expired. Try again."))
+    if not secrets.compare_digest(request.args.get("state", ""), pending["state"]):
+        return redirect(url_for("admin.login", error="That sign-in didn't come from here. Try again."))
+    if request.args.get("error"):
+        return redirect(url_for("admin.login", error="GitHub sign-in was cancelled."))
+    key = f"{request.remote_addr}|github"
+    if _throttled(key):
+        return redirect(url_for("admin.login", error="Too many attempts. Wait 15 minutes."))
+    api = settings.get(values, "GITHUB_API_URL")
+    try:
+        token = ghlogin.exchange(api, values["GITHUB_OAUTH_CLIENT_ID"], values["GITHUB_OAUTH_CLIENT_SECRET"],
+                                 request.args.get("code", ""), _callback_url(values), pending["verifier"])
+        who = ghlogin.identity(api, token)
+    except GitHubError as exc:
+        _failures[key].append(time.monotonic())
+        log.warning("GitHub sign-in failed: %s", exc)
+        return redirect(url_for("admin.login", error=f"GitHub sign-in failed: {exc}"))
+    mapping = {r: settings.split_list(settings.get(values, f"GITHUB_ROLE_{r.upper()}")) for r in settings.ROLES}
+    role = ghlogin.role_for(who, mapping)
+    if not role:
+        _failures[key].append(time.monotonic())
+        log.info("GitHub sign-in refused for %s: in none of the role lists", who["login"])
+        return redirect(url_for("admin.login", error=f"{who['login']} isn't allowed in. Ask an admin to add you "
+                                                     "or one of your GitHub teams under Users and access."))
+    with db.get_conn() as conn:
+        user_id = settings.github_user(conn, who, role, ghlogin.noreply_email(who["id"], who["login"]))
+    _sign_in(user_id)
+    return redirect(pending.get("next") or "/")
 
 
 @bp.post("/logout")
@@ -346,12 +412,18 @@ def github_scan():
     if not stale.isdigit() or not 1 <= int(stale) <= 3650:
         flash("Stale after must be a number of days.", "bad")
         return redirect(url_for("admin.github") + "#scan")
+    keep_pr, keep_log = form.get("RETAIN_PR_DAYS", "365").strip(), form.get("RETAIN_LOG_DAYS", "90").strip()
+    if not (keep_pr.isdigit() and 30 <= int(keep_pr) <= 3650 and keep_log.isdigit() and 7 <= int(keep_log) <= 3650):
+        flash("Keep closed PRs for 30 to 3650 days, and messages and scans for 7 to 3650 days.", "bad")
+        return redirect(url_for("admin.github") + "#scan")
     changes = {
         "REPO_INCLUDE": settings.join_list(settings.split_list(form.get("REPO_INCLUDE", ""))) or "*",
         "REPO_EXCLUDE": settings.join_list(settings.split_list(form.get("REPO_EXCLUDE", ""))),
         "INCLUDE_ARCHIVED": "true" if form.get("INCLUDE_ARCHIVED") else "false",
         "INCLUDE_FORKS": "true" if form.get("INCLUDE_FORKS") else "false",
         "STALE_DAYS": stale,
+        "RETAIN_PR_DAYS": keep_pr,
+        "RETAIN_LOG_DAYS": keep_log,
         "NEVER_FLAG": settings.join_list(settings.split_list(form.get("NEVER_FLAG", ""))),
         "PUBLIC_URL": form.get("PUBLIC_URL", "").strip().rstrip("/"),
         "GITHUB_API_URL": form.get("GITHUB_API_URL", "").strip().rstrip("/") or "https://api.github.com",
@@ -447,6 +519,8 @@ def notifications():
         key = settings.channel_url_key(c["id"])
         c["stored"] = _stored(meta, key, unreadable)
         c["url_host"] = urlsplit(values.get(key, "")).hostname or ""
+        c["bot"] = bool(c.get("slack_channel")) and settings.channel_token_key(c["id"]) in values
+        c["bot_stored"] = _stored(meta, settings.channel_token_key(c["id"]), unreadable)
         c["routes"] = ", ".join(filter(None, [c["repos"], c["teams"]])) or "every repo"
     rule_list = []
     for r in all_rules.values():
@@ -456,25 +530,46 @@ def notifications():
                            get=lambda k: settings.get(values, k), units=rules.UNITS, days=analysis.DAYS)
 
 
+SLACK_CHANNEL_ID = re.compile(r"^[CG][A-Z0-9]{6,}$")
+
+
+def _slack_bot_problem(token: str, channel: str) -> Optional[str]:
+    if not token.startswith("xoxb-"):
+        return "A Slack bot token starts with xoxb- (OAuth & Permissions › Bot User OAuth Token)"
+    if not SLACK_CHANNEL_ID.match(channel):
+        return "The Slack channel ID looks like C01ABCDEF23 (channel details › About, at the bottom)"
+    return None
+
+
 @bp.post("/settings/channels/new")
 def channel_new():
     form = request.form
     kind = form.get("kind")
     name = form.get("name", "").strip()
     url = form.get("url", "").strip()
+    token = form.get("bot_token", "").strip()
+    slack_channel = form.get("slack_channel", "").strip().upper()
+    back = redirect(url_for("admin.notifications", open=f"new-{kind}") + "#new")
     if kind not in ("teams", "slack") or not name:
         flash("Give the channel a name and a webhook URL.", "bad")
-        return redirect(url_for("admin.notifications", open="new-" + (kind or "")) + "#channels")
-    problem = _channel_url_problem(kind, url)
+        return back
+    if kind == "slack" and (token or slack_channel):
+        problem = _slack_bot_problem(token, slack_channel)
+        url = ""
+    else:
+        problem = _channel_url_problem(kind, url)
     if problem:
         flash(problem, "bad")
-        return redirect(url_for("admin.notifications", open=f"new-{kind}") + "#channels")
+        return back
     with db.get_conn() as conn:
-        cid = db.one(conn, "INSERT INTO channels (kind, name, repos, teams) VALUES (%s, %s, %s, %s) RETURNING id",
+        cid = db.one(conn, """INSERT INTO channels (kind, name, repos, teams, slack_channel) VALUES (%s, %s, %s, %s, %s)
+                              RETURNING id""",
                      (kind, name, settings.join_list(settings.split_list(form.get("repos", ""))),
-                      settings.join_list(t.lower().lstrip("@") for t in settings.split_list(form.get("teams", "")))))["id"]
-        settings.save(conn, {settings.channel_url_key(cid): url}, _actor(), record=False)
-        settings.history_add(conn, _actor(), f"Added {kind} channel {name}")
+                      settings.join_list(t.lower().lstrip("@") for t in settings.split_list(form.get("teams", ""))),
+                      slack_channel if token else ""))["id"]
+        secret = {settings.channel_token_key(cid): token} if token else {settings.channel_url_key(cid): url}
+        settings.save(conn, secret, _actor(), record=False)
+        settings.history_add(conn, _actor(), f"Added {kind} channel {name}" + (" (bot token, threads)" if token else ""))
     flash(f"{name} added. Send a test message to check it.", "ok")
     return redirect(url_for("admin.notifications", open=cid) + f"#ch-{cid}")
 
@@ -493,7 +588,8 @@ def channel_save(cid: int):
         c = _channel_or_404(conn, cid)
         if form.get("delete"):
             db.execute(conn, "DELETE FROM channels WHERE id = %s", (cid,))
-            settings.save(conn, {settings.channel_url_key(cid): None}, _actor(), record=False)
+            settings.save(conn, {settings.channel_url_key(cid): None, settings.channel_token_key(cid): None},
+                          _actor(), record=False)
             settings.history_add(conn, _actor(), f"Removed channel {c['name']}")
             flash(f"{c['name']} removed, with its queued messages.", "ok")
             return redirect(url_for("admin.notifications") + "#channels")
@@ -503,12 +599,26 @@ def channel_save(cid: int):
             flash(f"{c['name']} switched {'off' if c['enabled'] else 'on'}.", "ok")
             return redirect(url_for("admin.notifications") + f"#ch-{cid}")
         url = form.get("url", "").strip()
+        token = form.get("bot_token", "").strip()
+        slack_channel = form.get("slack_channel", "").strip().upper()
         if url:
             problem = _channel_url_problem(c["kind"], url)
             if problem:
                 flash(problem, "bad")
                 return redirect(url_for("admin.notifications", open=cid) + f"#ch-{cid}")
-            settings.save(conn, {settings.channel_url_key(cid): url}, _actor())
+            settings.save(conn, {settings.channel_url_key(cid): url, settings.channel_token_key(cid): None}, _actor())
+            db.execute(conn, "UPDATE channels SET slack_channel = '' WHERE id = %s", (cid,))
+        elif c["kind"] == "slack" and (token or slack_channel != c["slack_channel"]):
+            has_token = bool(token) or settings.channel_token_key(cid) in settings.secret_meta(conn)
+            problem = _slack_bot_problem(token or "xoxb-kept", slack_channel) if has_token else \
+                "Enter the bot token too, or a webhook URL instead."
+            if problem:
+                flash(problem, "bad")
+                return redirect(url_for("admin.notifications", open=cid) + f"#ch-{cid}")
+            if token:
+                settings.save(conn, {settings.channel_token_key(cid): token, settings.channel_url_key(cid): None},
+                              _actor())
+            db.execute(conn, "UPDATE channels SET slack_channel = %s WHERE id = %s", (slack_channel, cid))
         repos = settings.join_list(settings.split_list(form.get("repos", "")))
         teams = settings.join_list(t.lower().lstrip("@") for t in settings.split_list(form.get("teams", "")))
         name = form.get("name", "").strip() or c["name"]
@@ -605,8 +715,17 @@ def rule_save(key: str):
             if after is None or repeat is None or mx is None or form.get("unit") not in dict(rules.UNITS):
                 flash("Use numbers for the wait, the repeat and the maximum.", "bad")
                 return redirect(url_for("admin.notifications", open=key) + f"#rule-{key}")
-            p.update(after=after, repeat=repeat, max=int(mx), unit=form["unit"],
+            p.update(after=metrics_compact(after), repeat=metrics_compact(repeat), max=int(mx), unit=form["unit"],
                      skip_label=form.get("skip_label", "").strip(), group=bool(form.get("group")))
+        elif rule.kind == "assign":
+            after, count = _num(form.get("after"), 0, 10000), _num(form.get("count"), 1, 5)
+            if after is None or count is None or form.get("unit") not in dict(rules.UNITS):
+                flash("Use a number for the wait, and 1 to 5 reviewers.", "bad")
+                return redirect(url_for("admin.notifications", open=key) + f"#rule-{key}")
+            p.update(after=metrics_compact(after), unit=form["unit"], count=int(count), codeowners=bool(form.get("codeowners")),
+                     pool=settings.join_list(e.lower().lstrip("@") for e in settings.split_list(form.get("pool", ""))),
+                     repos=settings.join_list(settings.split_list(form.get("repos", ""))),
+                     skip_label=form.get("skip_label", "").strip())
         elif rule.kind == "digest":
             if form.get("day") not in analysis.DAYS or not HHMM.match(form.get("time", "")):
                 flash("Pick a day and a time (HH:MM).", "bad")
@@ -735,6 +854,24 @@ def tls_save():
     return redirect(url_for("admin.tls_page"))
 
 
+@bp.post("/settings/github-login")
+def github_login_save():
+    form = request.form
+    changes = {"GITHUB_LOGIN_ENABLED": "true" if form.get("GITHUB_LOGIN_ENABLED") else "false",
+               "GITHUB_OAUTH_CLIENT_ID": form.get("GITHUB_OAUTH_CLIENT_ID", "").strip()}
+    if form.get("GITHUB_OAUTH_CLIENT_SECRET", "").strip():
+        changes["GITHUB_OAUTH_CLIENT_SECRET"] = form["GITHUB_OAUTH_CLIENT_SECRET"].strip()
+    for role in settings.ROLES:
+        key = f"GITHUB_ROLE_{role.upper()}"
+        changes[key] = settings.join_list(e.lower().lstrip("@") for e in settings.split_list(form.get(key, "")))
+    if changes["GITHUB_LOGIN_ENABLED"] == "true" and not any(changes[f"GITHUB_ROLE_{r.upper()}"] for r in settings.ROLES):
+        flash("Name at least one team, organisation or login in the role lists, or nobody could sign in with GitHub.", "bad")
+        return redirect(url_for("admin.users") + "#github")
+    with db.get_conn() as conn:
+        _saved(settings.save(conn, changes, _actor()))
+    return redirect(url_for("admin.users") + "#github")
+
+
 # ─── Settings: users ────────────────────────────────────────────────────────
 
 def _link(token: str) -> str:
@@ -756,9 +893,18 @@ def users(new_link: Optional[dict] = None, error: Optional[str] = None, adding: 
             p["last"] = f"Not yet: setup link expires in {hours} h"
         else:
             p["last"] = "Not yet: setup link expired"
+    with db.get_conn() as conn:
+        unreadable: set = set()
+        values = settings.load(conn, unreadable)
+        meta = settings.secret_meta(conn)
+    gh = {"enabled": settings.flag(values, "GITHUB_LOGIN_ENABLED"),
+          "client_id": values.get("GITHUB_OAUTH_CLIENT_ID", ""),
+          "secret": _stored(meta, "GITHUB_OAUTH_CLIENT_SECRET", unreadable),
+          "callback": _callback_url(values),
+          "roles": {r: settings.get(values, f"GITHUB_ROLE_{r.upper()}") for r in settings.ROLES}}
     return render_template("settings_users.html", people=people_rows, history=history, new_link=new_link,
                            error=error, adding=adding or request.args.get("add") == "1", form=form or {},
-                           roles=settings.ROLES)
+                           roles=settings.ROLES, gh=gh)
 
 
 @bp.post("/settings/users/new")
@@ -781,6 +927,9 @@ def user_role(user_id: int):
     if user_id == g.user["id"]:
         return users(error="You can't change your own role. Ask another admin.")
     with db.get_conn() as conn:
+        target = settings.user(conn, user_id)
+        if target and target["github_login"]:
+            return users(error=f"{target['name']}'s role comes from their GitHub teams: change the role lists instead.")
         problem = settings.set_role(conn, user_id, request.form.get("role", ""), _actor())
     if problem:
         return users(error=problem)
@@ -794,6 +943,8 @@ def user_link(user_id: int):
         person = settings.user(conn, user_id)
         if not person:
             abort(404)
+        if person["github_login"]:
+            return users(error=f"{person['name']} signs in with GitHub, so has no password to set.")
         new = settings.new_setup_link(conn, user_id, _actor())
     return users(new_link={"name": person["name"], "role": person["role"], "url": _link(new.token)})
 

@@ -31,7 +31,7 @@ log = logging.getLogger("branchwarden.rules")
 @dataclass(frozen=True)
 class Rule:
     key: str
-    kind: str            # event | reminder | digest
+    kind: str            # event | assign | reminder | digest
     name: str
     defaults: dict
     enabled: bool = True
@@ -44,6 +44,9 @@ RULES = (
     Rule("opened", "event", "PR opened or ready for review", {"target": "routed", "mention": True}),
     Rule("review", "event", "Review submitted", {"target": "routed", "mention": True}),
     Rule("closed", "event", "Merged or closed", {"target": "routed", "mention": False}),
+    Rule("assign", "assign", "Auto-assign reviewers",
+         {"after": 1, "unit": "working_hours", "count": 1, "codeowners": True, "pool": "", "repos": "",
+          "skip_label": "do-not-review", "target": "routed", "mention": True}, enabled=False),
     Rule("no_reviewer", "reminder", "No reviewer assigned",
          {**REMINDER_DEFAULTS, "after": 4, "max": 2, "mention": False}),
     Rule("waiting", "reminder", "Waiting for review", dict(REMINDER_DEFAULTS)),
@@ -83,6 +86,13 @@ def describe(rule: dict, channel_names: dict[int, str]) -> str:
                 "review": "Approved or changes requested: tells the author"
                           + (" with an @mention" if p.get("mention") else ""),
                 "closed": "Merged, or closed without merging, noting a branch left behind"}[rule["key"]]
+    if rule["kind"] == "assign":
+        count = int(p.get("count", 1))
+        source = (["code owners"] if p.get("codeowners") else []) + \
+                 ([f"the least busy of {p['pool']}"] if p.get("pool") else ["the least busy recent reviewers"])
+        where = f" in {p['repos']}" if p.get("repos") else ""
+        return (f"After {_amount(p['after'], p['unit'])} with nobody asked{where}: requests {count} "
+                f"reviewer{'s' if count != 1 else ''} on GitHub, from {' then '.join(source)}")
     if rule["kind"] == "digest":
         return f"{p['day'].capitalize()}days at {p['time']}: stale branches and branches left after a PR, per repo"
     who = {"no_reviewer": "nudges the channel", "waiting": "reminds the requested reviewers",
@@ -128,8 +138,11 @@ def _facts(pr: dict) -> list:
     return facts
 
 
-def _buttons(pr: dict, values: dict) -> list:
-    return [["Open pull request", pr["url"]], ["Open in Branchwarden", _link(values, f"/pulls?assign={pr['id']}")]]
+def _buttons(pr: dict, values: dict, snooze: bool = False) -> list:
+    buttons = [["Open pull request", pr["url"]], ["Open in Branchwarden", _link(values, f"/pulls?assign={pr['id']}")]]
+    if snooze:
+        buttons.append(["Snooze", _link(values, f"/pulls?assign={pr['id']}#snooze")])
+    return buttons
 
 
 def _who(logins: list[str], mention: bool) -> str:
@@ -253,7 +266,8 @@ def run_reminders(conn, values: dict, now: Optional[datetime] = None) -> int:
     rules = [r for r in load(conn).values() if r["kind"] == "reminder" and r["enabled"]]
     if not rules:
         return 0
-    prs = data.open_prs(conn, now=now)
+    snoozed = {r["pr_id"] for r in db.rows(conn, "SELECT pr_id FROM snoozes WHERE until > %s", (now,))}
+    prs = [p for p in data.open_prs(conn, now=now) if p["id"] not in snoozed]
     sent_before = {(r["rule"], r["pr_id"]): r for r in db.rows(conn, "SELECT * FROM reminders")}
     queued = 0
     grouped: dict = defaultdict(list)     # (rule key, channel id) -> [(pr, text)]
@@ -288,7 +302,7 @@ def run_reminders(conn, values: dict, now: Optional[datetime] = None) -> int:
             else:
                 msg = {"heading": heading, "tone": "bad" if rule["key"] == "changes" else "warn",
                        "title": pr["title"], "title_url": pr["url"], "facts": _facts(pr), "text": text,
-                       "buttons": _buttons(pr, values), "pr": pr["ref"]}
+                       "buttons": _buttons(pr, values, snooze=True), "pr": pr["ref"]}
                 queued += notify.enqueue(conn, chans, f"reminder:{rule['key']}", msg, pr["id"])
             db.execute(conn, """
                 INSERT INTO reminders (rule, pr_id, since, count, last_at) VALUES (%s, %s, %s, %s, %s)
@@ -296,7 +310,7 @@ def run_reminders(conn, values: dict, now: Optional[datetime] = None) -> int:
                     last_at = EXCLUDED.last_at""", (rule["key"], pr["id"], since, count + 1, now))
         # Forget reminders for PRs that have left this state, so a return to it starts afresh.
         db.execute(conn, "DELETE FROM reminders WHERE rule = %s AND NOT (pr_id = ANY(%s))",
-                   (rule["key"], list(live)))
+                   (rule["key"], list(live | snoozed)))
     for (key, cid), items in grouped.items():
         rule = RULE_BY_KEY[key]
         lines = [{"link": pr["url"], "label": pr["ref"], "text": f"{pr['title']}: {text}"} for pr, _, text in items]
@@ -376,3 +390,110 @@ def run_digest(conn, values: dict, now: Optional[datetime] = None, force: bool =
             queued += notify.enqueue(conn, [c], "digest", msg)
     db.execute(conn, "UPDATE rules SET last_run_at = %s WHERE key = 'digest'", (now,))
     return queued
+
+
+# ─── Auto-assigning reviewers ───────────────────────────────────────────────
+
+def _expand(client, entries: list[str], cache: dict) -> list[str]:
+    """Logins, with org/team slugs replaced by the team's members."""
+    out: list[str] = []
+    for e in entries:
+        e = e.strip().lstrip("@").lower()
+        if not e:
+            continue
+        if "/" in e:
+            if e not in cache:
+                try:
+                    cache[e] = client.team_members(e)
+                except Exception as exc:  # GitHubError, or no team access
+                    log.info("Can't list members of %s: %s", e, exc)
+                    cache[e] = []
+            out.extend(cache[e])
+        else:
+            out.append(e)
+    return out
+
+
+def assign_candidates(conn, pr: dict, p: dict, client, cache: dict) -> list[tuple[str, list[str]]]:
+    groups: list[tuple[str, list[str]]] = []
+    if p.get("codeowners"):
+        owners = analysis.owners_for(pr.get("files") or [], pr.get("codeowners") or "")
+        if owners:
+            groups.append(("a code owner of the files changed", _expand(client, owners, cache)))
+    pool = settings.split_list(p.get("pool", ""))
+    if pool:
+        groups.append(("the least busy in the reviewer pool", _expand(client, pool, cache)))
+    else:
+        recent = db.rows(conn, """SELECT DISTINCT r->>'login' AS login FROM pull_requests x, jsonb_array_elements(x.reviews) r
+                                   WHERE x.repo_id = %s AND x.created_at > NOW() - INTERVAL '120 days'""", (pr["repo_id"],))
+        groups.append(("the least busy recent reviewer here", [r["login"] for r in recent]))
+    return groups
+
+
+def run_auto_assign(conn, values: dict, now: Optional[datetime] = None, connections=None) -> int:
+    """Request reviewers for PRs nobody has been asked to review. Returns how many PRs it assigned."""
+    from github import Connections, GitHubError
+    now = now or datetime.now(timezone.utc)
+    rule = load(conn)["assign"]
+    if not rule["enabled"]:
+        return 0
+    hours = work_hours(values)
+    if not hours.is_open(now):
+        return 0
+    p = rule["params"]
+    repos = settings.split_list(p.get("repos", ""))
+    tried = {r["pr_id"]: r for r in db.rows(conn, "SELECT * FROM reminders WHERE rule = 'assign'")}
+    load_by = {r["login"]: r["n"] for r in db.rows(conn, """
+        SELECT x->>'user' AS login, COUNT(*) AS n FROM pull_requests pr, jsonb_array_elements(pr.requested) x
+         WHERE pr.state = 'open' AND x ? 'user' GROUP BY 1""")}
+    recent = {r["reviewer"]: r["n"] for r in db.rows(conn, """
+        SELECT reviewer, COUNT(*) AS n FROM assignments WHERE assigned_at > NOW() - INTERVAL '14 days' GROUP BY 1""")}
+    conns = connections or Connections(values)
+    cache: dict = {}
+    done = 0
+    for pr in data.open_prs(conn, now=now):
+        if pr["draft"] or pr["state_key"] != "no_reviewer":
+            continue
+        if p.get("skip_label") and p["skip_label"] in (pr.get("labels") or []):
+            continue
+        if repos and not analysis.matches(pr["full_name"], repos):
+            continue
+        prev = tried.get(pr["id"])
+        if prev and prev["since"] == pr["since"]:
+            continue                 # one go per time the PR is in this state
+        if analysis.elapsed(pr["since"], now, p.get("unit", "working_hours"), hours) < float(p.get("after", 1)):
+            continue
+        db.execute(conn, """INSERT INTO reminders (rule, pr_id, since, count, last_at) VALUES ('assign', %s, %s, 1, %s)
+                            ON CONFLICT (rule, pr_id) DO UPDATE SET since = EXCLUDED.since, count = 1,
+                                last_at = EXCLUDED.last_at""", (pr["id"], pr["since"], now))
+        try:
+            client = conns.client_for(pr["target_login"], pr["target_via"])
+            groups = assign_candidates(conn, pr, p, client, cache)
+            chosen = analysis.choose_reviewers(groups, count=int(p.get("count", 1)),
+                                               exclude={(pr.get("author") or "").lower()}, load=load_by, recent=recent)
+            if not chosen:
+                log.info("Auto-assign: nobody to ask for %s", pr["ref"])
+                continue
+            client.request_reviewers(pr["full_name"], pr["number"], [c for c, _ in chosen], [])
+        except GitHubError as exc:
+            log.warning("Auto-assign for %s failed: %s", pr["ref"], exc)
+            continue
+        requested = list(pr.get("requested") or []) + [{"user": c} for c, _ in chosen]
+        db.execute(conn, "UPDATE pull_requests SET requested = %s, review_requested_at = %s WHERE id = %s",
+                   (Json(requested), now, pr["id"]))
+        for c, _ in chosen:
+            db.execute(conn, "INSERT INTO assignments (pr_id, reviewer, by_rule, by_name) VALUES (%s, %s, TRUE, %s)",
+                       (pr["id"], c, "Branchwarden"))
+            load_by[c] = load_by.get(c, 0) + 1
+            recent[c] = recent.get(c, 0) + 1
+        db.request_scan(conn, pr["full_name"], "reviewers auto-assigned")
+        mention = p.get("mention", True)
+        who = "; ".join(f"{'@{' + c + '}' if mention else c} ({why})" for c, why in chosen)
+        pr = data.enrich_pr({**pr, "requested": requested}, now)
+        msg = {"heading": "Reviewer assigned", "tone": "info", "title": pr["title"], "title_url": pr["url"],
+               "facts": _facts(pr), "text": f"Branchwarden asked {who} to review this.",
+               "buttons": _buttons(pr, values), "pr": pr["ref"]}
+        chans = notify.channels_for(conn, str(p.get("target", "routed")), pr["full_name"], pr["requested_teams"])
+        notify.enqueue(conn, chans, "assigned", msg, pr["id"])
+        done += 1
+    return done

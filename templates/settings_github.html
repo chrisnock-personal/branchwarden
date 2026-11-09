@@ -144,6 +144,8 @@
       <div class="field"><label for="stale">Branches are stale after (days)</label><input class="input num" id="stale" name="STALE_DAYS" value="{{ get('STALE_DAYS') }}" inputmode="numeric"></div>
       <div class="field"><label for="never">Never flag branches matching</label><input class="input mono" id="never" name="NEVER_FLAG" value="{{ get('NEVER_FLAG') }}"></div>
       <div class="field"><label for="public">Branchwarden's address</label><input class="input mono" id="public" name="PUBLIC_URL" value="{{ get('PUBLIC_URL') }}" placeholder="https://branchwarden.example.com"><span class="help">For links in messages and the webhook URL above.</span></div>
+      <div class="field"><label for="keep-pr">Keep closed pull requests for (days)</label><input class="input num" id="keep-pr" name="RETAIN_PR_DAYS" value="{{ get('RETAIN_PR_DAYS') }}" inputmode="numeric"><span class="help">The metrics look back this far. 30 to 3650.</span></div>
+      <div class="field"><label for="keep-log">Keep messages and scans for (days)</label><input class="input num" id="keep-log" name="RETAIN_LOG_DAYS" value="{{ get('RETAIN_LOG_DAYS') }}" inputmode="numeric"><span class="help">Older ones are removed once an hour. 7 to 3650.</span></div>
       <div class="field"><label for="api">GitHub API address</label><input class="input mono" id="api" name="GITHUB_API_URL" value="{{ get('GITHUB_API_URL') }}"><span class="help">Change it only for GitHub Enterprise Server: https://host/api/v3</span></div>
     </div>
     <div class="actions"><span></span><div class="end"><button type="submit" class="btn primary">Save</button></div></div>

@@ -51,7 +51,7 @@
               <td class="nowrap"><span class="badge {{ p.tone }}">{{ p.state_label }}</span></td>
               <td class="nowrap"><span class="tone-{{ p.ci_tone }} dot" style="font-size: 13px; font-weight: 600">{{ p.ci_label }}</span></td>
               <td>{% include "_marks.html" %}</td>
-              <td class="nowrap sub" title="Waiting on {{ p.waiting_on }}">{{ p.waiting }}<div class="pr-sub">on {{ p.waiting_on }}</div></td>
+              <td class="nowrap sub" title="Waiting on {{ p.waiting_on }}">{{ p.waiting }}<div class="pr-sub">on {{ p.waiting_on }}</div>{% if p.snooze %}<div class="pr-sub" title="Reminders snoozed by {{ p.snooze.by_name }}">snoozed to {{ p.snooze.until.strftime('%d %b') }}</div>{% endif %}</td>
               <td class="nowrap"><a class="btn small" href="{{ link(assign=p.id) }}#assign">{{ 'Reviewers' if can_act else 'Details' }}</a></td>
             </tr>
           {% endfor %}
@@ -124,7 +124,20 @@
             </div>
             <p class="hint">Sent to GitHub as a review request (or its removal), through the GitHub App where it's installed, otherwise the token. Unticking someone who's requested now removes the request.</p>
           </form>
-          {% elif not can_act %}
+          {% endif %}
+          {% if can_act %}
+          <div id="snooze" style="display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border); padding-top: 16px">
+            <span class="eyebrow">Reminders</span>
+            {% if sel.snooze %}<p class="hint" style="margin: 0">Snoozed until {{ sel.snooze.until.strftime('%a %d %b %H:%M') }} UTC by {{ sel.snooze.by_name }}.</p>{% else %}<p class="hint" style="margin: 0">On. Snooze them while this PR is parked on purpose.</p>{% endif %}
+            <form method="post" action="{{ url_for('snooze', pr_id=sel.id, **request.args) }}" class="acts" style="justify-content: flex-start">
+              {{ csrf() }}
+              {% for d in [1, 3, 7] %}<button class="btn small" name="days" value="{{ d }}">{{ d }} day{{ 's' if d != 1 }}</button>{% endfor %}
+              {% if sel.snooze %}<button class="btn small" name="days" value="0">Turn back on</button>{% endif %}
+            </form>
+          </div>
+          {% if assign_rule.enabled and sel.state_key == 'no_reviewer' %}<p class="hint">Auto-assign is on: if nobody is asked, Branchwarden picks a reviewer after {{ assign_rule.params.after }} {{ assign_rule.params.unit|replace('_', ' ') }}.</p>{% endif %}
+          {% endif %}
+          {% if not can_act %}
           <div>{% set p = sel %}{% include "_marks.html" %}</div>
           <p class="hint">Members and admins can request reviewers here.</p>
           {% endif %}

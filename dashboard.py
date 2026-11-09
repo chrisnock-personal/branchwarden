@@ -32,6 +32,7 @@ load_dotenv()
 import analysis  # noqa: E402
 import data  # noqa: E402
 import db  # noqa: E402
+import metrics  # noqa: E402
 import notify  # noqa: E402
 import rules  # noqa: E402
 import settings  # noqa: E402
@@ -322,6 +323,8 @@ def pulls():
         repos = sorted({(p["full_name"], p["repo_name"]) for p in prs}, key=lambda r: r[1])
         last_hook = db.one(conn, "SELECT MAX(received_at) AS at FROM webhook_log WHERE status = 202")["at"]
         last_scan = db.one(conn, "SELECT MAX(finished_at) AS at FROM scan_log")["at"]
+        snoozed = {r["pr_id"]: r for r in db.rows(conn, "SELECT * FROM snoozes WHERE until > NOW()")}
+        assign_rule = rules.load(conn)["assign"]
         sel = None
         picker = None
         if assign:
@@ -344,11 +347,14 @@ def pulls():
     shown = sorted(shown, key=key, reverse=True) if key else sorted(shown, key=lambda p: -p["waiting_seconds"])
     for p in shown:
         p["marks"] = data.reviewer_marks(p)
+        p["snooze"] = snoozed.get(p["id"])
     if sel:
         sel["marks"] = data.reviewer_marks(sel)
+        sel["snooze"] = snoozed.get(sel["id"])
     return render_template("pulls.html", prs=shown, total=len(prs), chips=chips, state=f, repo=repo,
                            repos=repos, sort=sort, sorts=SORTS, q=q, sel=sel, picker=picker,
-                           repo_count=len({p["repo_id"] for p in prs}), last_hook=last_hook, last_scan=last_scan)
+                           repo_count=len({p["repo_id"] for p in prs}), last_hook=last_hook, last_scan=last_scan,
+                           assign_rule=assign_rule)
 
 
 @app.post("/pulls/<int:pr_id>/reviewers")
@@ -386,6 +392,9 @@ def assign_reviewers(pr_id: int):
                    (Json(new), pr_id))
         db.request_scan(conn, pr["full_name"], "reviewers changed")
         actor = g.user["name"]
+        for x in sorted(add):
+            db.execute(conn, "INSERT INTO assignments (pr_id, reviewer, by_rule, by_name) VALUES (%s, %s, FALSE, %s)",
+                       (pr_id, x[2:], actor))
         settings.history_add(conn, actor, f"{pr['full_name']} #{pr['number']}: requested review from "
                              f"{', '.join(split(add, 'u:') + split(add, 't:')) or 'nobody new'}"
                              + (f"; removed {', '.join(split(remove, 'u:') + split(remove, 't:'))}" if remove else ""))
@@ -407,6 +416,45 @@ def assign_reviewers(pr_id: int):
     what = f"Review requested on GitHub from {', '.join(names)}." if names else "Reviewers removed on GitHub."
     flash(what + told, "ok")
     return redirect(url_for("pulls", **{k: v for k, v in request.args.items() if k != "assign"}))
+
+
+SNOOZE_DAYS = (1, 3, 7)
+
+
+@app.post("/pulls/<int:pr_id>/snooze")
+def snooze(pr_id: int):
+    if not can_act():
+        abort(403)
+    days = request.form.get("days", type=int)
+    with db.get_conn() as conn:
+        pr = db.one(conn, "SELECT p.number, r.full_name FROM pull_requests p JOIN repos r ON r.id = p.repo_id "
+                          "WHERE p.id = %s AND p.state = 'open'", (pr_id,))
+        if not pr:
+            abort(404)
+        if days in SNOOZE_DAYS:
+            until = datetime.now(timezone.utc) + timedelta(days=days)
+            db.execute(conn, """INSERT INTO snoozes (pr_id, until, by_name) VALUES (%s, %s, %s)
+                                ON CONFLICT (pr_id) DO UPDATE SET until = EXCLUDED.until, by_name = EXCLUDED.by_name,
+                                    at = NOW()""", (pr_id, until, g.user["name"]))
+            settings.history_add(conn, g.user["name"], f"{pr['full_name']} #{pr['number']}: reminders snoozed for {days} day{'s' if days != 1 else ''}")
+            flash(f"No reminders about this PR until {until:%a %d %b %H:%M} UTC.", "ok")
+        else:
+            db.execute(conn, "DELETE FROM snoozes WHERE pr_id = %s", (pr_id,))
+            flash("Reminders about this PR are back on.", "ok")
+    return redirect(url_for("pulls", **{k: v for k, v in request.args.items()}) + "#snooze")
+
+
+# ─── Metrics ────────────────────────────────────────────────────────────────
+
+@app.get("/metrics")
+def metrics_page():
+    days = request.args.get("days", type=int)
+    days = days if days in dict(metrics.PERIODS) else 30
+    repo = request.args.get("repo", "")
+    with db.get_conn() as conn:
+        m = metrics.compute(conn, days, repo)
+        repos = db.rows(conn, "SELECT full_name, name FROM repos WHERE included ORDER BY name")
+    return render_template("metrics.html", m=m, periods=metrics.PERIODS, days=days, repo=repo, repos=repos)
 
 
 # ─── Branches ───────────────────────────────────────────────────────────────

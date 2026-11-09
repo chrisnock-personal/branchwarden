@@ -18,6 +18,10 @@ reminders        – how often each reminder has gone out for each PR
 scan_log         – one row per scan, for the dashboard
 scan_requests    – repos to rescan soon (from webhooks and reviewer requests)
 org_cache        – org members and teams, for the reviewer picker
+assignments      – reviewers Branchwarden or someone in the dashboard requested
+snoozes          – reminders someone has put off for a PR
+threads          – the Slack message each PR's thread hangs off, per channel
+daily            – one row a day of headline counts, for the trend charts
 settings, users, settings_log – see settings.py
 """
 
@@ -231,6 +235,45 @@ CREATE TABLE IF NOT EXISTS org_cache (
     fetched_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- First review, for the metrics (latestReviews only has the newest per reviewer).
+ALTER TABLE pull_requests ADD COLUMN IF NOT EXISTS first_review_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_pull_requests_ended ON pull_requests (repo_id, merged_at) WHERE state <> 'open';
+
+CREATE TABLE IF NOT EXISTS assignments (
+    id              SERIAL PRIMARY KEY,
+    pr_id           INTEGER NOT NULL REFERENCES pull_requests (id) ON DELETE CASCADE,
+    reviewer        TEXT NOT NULL,                 -- login, or org/team slug
+    by_rule         BOOLEAN NOT NULL DEFAULT FALSE,-- auto-assigned, not by a person
+    by_name         TEXT,
+    assigned_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_assignments_reviewer ON assignments (reviewer, assigned_at DESC);
+
+CREATE TABLE IF NOT EXISTS snoozes (
+    pr_id           INTEGER PRIMARY KEY REFERENCES pull_requests (id) ON DELETE CASCADE,
+    until           TIMESTAMPTZ NOT NULL,
+    by_name         TEXT,
+    at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS threads (
+    channel_id      INTEGER NOT NULL REFERENCES channels (id) ON DELETE CASCADE,
+    pr_id           INTEGER NOT NULL REFERENCES pull_requests (id) ON DELETE CASCADE,
+    ts              TEXT NOT NULL,                 -- Slack's message timestamp
+    PRIMARY KEY (channel_id, pr_id)
+);
+
+-- Slack channels sent through a bot token (for threads) instead of a webhook.
+ALTER TABLE channels ADD COLUMN IF NOT EXISTS slack_channel TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE IF NOT EXISTS daily (
+    day             DATE PRIMARY KEY,
+    open_prs        INTEGER NOT NULL,
+    needs_review    INTEGER NOT NULL,
+    stale_branches  INTEGER NOT NULL,
+    left_branches   INTEGER NOT NULL
+);
+
 -- Settings edited in the dashboard (see settings.py). Secrets are encrypted.
 CREATE TABLE IF NOT EXISTS settings (
     key             TEXT PRIMARY KEY,
@@ -251,6 +294,10 @@ CREATE TABLE IF NOT EXISTS users (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_login      TIMESTAMPTZ
 );
+
+-- People who sign in with GitHub: their role comes from their teams at each sign-in.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS github_id BIGINT UNIQUE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS github_login TEXT;
 
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
 ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('admin', 'member', 'viewer'));

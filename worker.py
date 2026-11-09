@@ -7,7 +7,9 @@ Branchwarden's background worker. Every few seconds it:
 - rescans repos that webhooks or the dashboard asked about,
 - runs a full scan of every account when the scan interval has passed,
 - queues messages for what the scans saw happen (see rules.py),
+- requests reviewers for PRs nobody was asked to review (when that rule is on),
 - queues reminders during working hours and the weekly digest when it's due,
+- once an hour, removes old records and writes the day's counts for the trend charts,
 - sends what's queued to Teams and Slack (see notify.py).
 
 Only one worker runs at a time: a second one waits on a Postgres advisory lock.
@@ -33,6 +35,7 @@ load_dotenv()
 import psycopg2  # noqa: E402
 
 import db  # noqa: E402
+import housekeeping  # noqa: E402
 import notify  # noqa: E402
 import rules  # noqa: E402
 import scanner  # noqa: E402
@@ -44,7 +47,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-7s  %(
 log = logging.getLogger("branchwarden")
 
 TICK = 5            # seconds between loops
-REMINDER_EVERY = 60  # seconds between reminder checks
+REMINDER_EVERY = 60  # seconds between reminder and auto-assign checks
+HOUSEKEEPING_EVERY = 3600
 _stop: list[bool] = []
 
 
@@ -117,11 +121,20 @@ def tick(state: dict, *, force_full: bool = False) -> None:
             conn.commit()
         if force_full or time.monotonic() - state.get("reminders_at", 0) >= REMINDER_EVERY:
             state["reminders_at"] = time.monotonic()
+            assigned = rules.run_auto_assign(conn, values, now)
+            conn.commit()
+            if assigned:
+                log.info("Auto-assigned reviewers on %d pull request%s", assigned, "s" if assigned != 1 else "")
             n = rules.run_reminders(conn, values, now)
             n += rules.run_digest(conn, values, now)
             conn.commit()
             if n:
                 log.info("Queued %d reminder and digest messages", n)
+        if force_full or time.monotonic() - state.get("housekeeping_at", -HOUSEKEEPING_EVERY) >= HOUSEKEEPING_EVERY:
+            state["housekeeping_at"] = time.monotonic()
+            housekeeping.prune(conn, values)
+            housekeeping.snapshot(conn, values, now)
+            conn.commit()
         sent, failed = notify.deliver(conn)
         if sent or failed:
             log.info("Delivered %d messages, %d failed", sent, failed)

@@ -57,9 +57,17 @@ DEFAULTS = {
     "WORK_END": ("Working day ends", "17:30"),
     "WORK_TZ": ("Time zone", "Europe/London"),
     "PUBLIC_URL": ("Branchwarden's address", ""),
+    "RETAIN_PR_DAYS": ("Keep closed pull requests for (days)", "365"),
+    "RETAIN_LOG_DAYS": ("Keep messages and scans for (days)", "90"),
+    "GITHUB_LOGIN_ENABLED": ("Sign in with GitHub", "false"),
+    "GITHUB_OAUTH_CLIENT_ID": ("GitHub sign-in client ID", ""),
+    "GITHUB_OAUTH_CLIENT_SECRET": ("GitHub sign-in client secret", ""),
+    "GITHUB_ROLE_ADMIN": ("Admins: GitHub teams or logins", ""),
+    "GITHUB_ROLE_MEMBER": ("Members: GitHub teams or logins", ""),
+    "GITHUB_ROLE_VIEWER": ("Viewers: GitHub teams or logins", ""),
 }
 
-SECRETS = {"GITHUB_APP_PRIVATE_KEY", "GITHUB_WEBHOOK_SECRET", "GITHUB_TOKEN"}
+SECRETS = {"GITHUB_APP_PRIVATE_KEY", "GITHUB_WEBHOOK_SECRET", "GITHUB_TOKEN", "GITHUB_OAUTH_CLIENT_SECRET"}
 
 SCAN_INTERVALS = (("5", "5 minutes"), ("10", "10 minutes"), ("15", "15 minutes"),
                   ("30", "30 minutes"), ("60", "1 hour"))
@@ -73,16 +81,21 @@ def channel_url_key(channel_id: int) -> str:
     return f"CHANNEL_{channel_id}_URL"
 
 
+def channel_token_key(channel_id: int) -> str:
+    """A Slack channel's bot token, when it posts through the API (for threads)."""
+    return f"CHANNEL_{channel_id}_TOKEN"
+
+
 def is_secret(key: str) -> bool:
-    return key in SECRETS or bool(re.fullmatch(r"CHANNEL_\d+_URL", key))
+    return key in SECRETS or bool(re.fullmatch(r"CHANNEL_\d+_(URL|TOKEN)", key))
 
 
 def label(key: str) -> str:
     if key in DEFAULTS:
         return DEFAULTS[key][0]
-    m = re.fullmatch(r"CHANNEL_(\d+)_URL", key)
+    m = re.fullmatch(r"CHANNEL_(\d+)_(URL|TOKEN)", key)
     if m:
-        return f"Channel {m.group(1)} webhook URL"
+        return f"Channel {m.group(1)} {'webhook URL' if m.group(2) == 'URL' else 'bot token'}"
     return key
 
 
@@ -368,13 +381,13 @@ def user_count(conn) -> int:
 
 
 def users(conn) -> list[dict]:
-    return db.rows(conn, """SELECT id, email, name, role, last_login, setup_expires,
-                                   password_hash IS NOT NULL AS active
+    return db.rows(conn, """SELECT id, email, name, role, last_login, setup_expires, github_login,
+                                   (password_hash IS NOT NULL OR github_id IS NOT NULL) AS active
                               FROM users ORDER BY role, name""")
 
 
 def user(conn, user_id: int) -> Optional[dict]:
-    return db.one(conn, "SELECT id, email, name, role FROM users WHERE id = %s", (user_id,))
+    return db.one(conn, "SELECT id, email, name, role, github_login FROM users WHERE id = %s", (user_id,))
 
 
 def admin_count(conn) -> int:
@@ -457,6 +470,23 @@ def check_login(conn, email: str, password: str) -> Optional[dict]:
         return None
     db.execute(conn, "UPDATE users SET last_login = NOW() WHERE id = %s", (row["id"],))
     return {k: row[k] for k in ("id", "name", "role")}
+
+
+def github_user(conn, who: dict, role: str, email: str) -> int:
+    """Create or update the account of someone signing in with GitHub; returns its id."""
+    row = db.one(conn, "SELECT id, role FROM users WHERE github_id = %s", (who["id"],))
+    if row:
+        db.execute(conn, """UPDATE users SET github_login = %s, name = %s, role = %s, last_login = NOW()
+                            WHERE id = %s""", (who["login"], who["name"], role, row["id"]))
+        if row["role"] != role:
+            history_add(conn, "Branchwarden", f"{who['name']} ({who['login']}): role changed from "
+                                              f"{row['role']} to {role} by their GitHub teams")
+        return row["id"]
+    new_id = db.one(conn, """INSERT INTO users (email, name, role, github_id, github_login, last_login)
+                             VALUES (lower(%s), %s, %s, %s, %s, NOW()) RETURNING id""",
+                    (email, who["name"], role, who["id"], who["login"]))["id"]
+    history_add(conn, "Branchwarden", f"{who['name']} ({who['login']}) signed in with GitHub for the first time, as {role}")
+    return new_id
 
 
 def set_role(conn, user_id: int, role: str, actor: str) -> Optional[str]:
