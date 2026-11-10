@@ -47,8 +47,7 @@
   </nav>
   <div class="tools">
     <form class="search" method="get" action="{{ url_for('branches') if ep == 'branches' else url_for('pulls') }}" role="search">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="color: var(--muted)"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-      <label for="q" class="sr-only">Search</label>
+      <label for="q" class="search-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="color: var(--muted)"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><span class="sr-only">Search</span></label>
       <input id="q" type="search" name="q" value="{{ q or '' }}" placeholder="Search…" title="{{ 'Search branches, repos and people' if ep == 'branches' else 'Search pull requests, branches and people' }}">
     </form>
     {{ theme_button() }}
