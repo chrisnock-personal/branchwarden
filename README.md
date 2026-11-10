@@ -15,7 +15,7 @@ organisation or account:
   from CODEOWNERS and who has reviewed in that repo recently. An optional rule
   assigns one automatically when nobody has been asked: code owners first, then
   the least busy person in a pool.
-- **My work:** what's waiting on you: reviews asked of you (oldest first),
+- **My work** (in the menu under your name, which shows how many reviews are waiting on you): what's waiting on you: reviews asked of you (oldest first),
   your open PRs and what each needs next, your branches to tidy, and your
   snoozed reminders. People who sign in with GitHub land on it. Local accounts
   can give their GitHub login on the page itself.
@@ -86,7 +86,7 @@ After that, scans pick up new PRs, reviews, merges and closes.
   `X-Hub-Signature-256` are refused anyway.
 - **Messages** are queued per channel in Postgres and retried with back-off
   (1 min, 5 min, 15 min, 1 h, 3 h, 6 h) on 429 or 5xx responses. Other 4xx
-  responses are permanent failures, shown on the Deliveries page.
+  responses are permanent failures, shown under *Settings › Deliveries*.
 
 ## Connecting to GitHub
 
@@ -180,8 +180,8 @@ appears as a bold name.
 | Role | Can |
 |---|---|
 | Admin | Everything: GitHub connections, channels and rules, people, the TLS certificate, users |
-| Member | Read everything, request reviewers, snooze reminders, ignore branches, start a scan |
-| Viewer | Read the overview, pull requests, branches and deliveries |
+| Member | What viewers can, plus request reviewers, snooze reminders, ignore branches and start a scan |
+| Viewer | Read the overview, pull requests, branches, metrics and MVP, and their own My work |
 
 People are added under *Settings › Users and access*. Each gets a one-time setup
 link that lasts 24 hours. Branchwarden doesn't send email, so you pass the link on.

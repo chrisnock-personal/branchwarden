@@ -6,6 +6,7 @@
     {% set ep = request.endpoint or '' %}
     {% for endpoint, label, prefixes in [('admin.github', 'GitHub', ('admin.github', 'admin.target')),
                                          ('admin.notifications', 'Channels and reminders', ('admin.notifications', 'admin.channel', 'admin.rule', 'admin.workhours')),
+                                         ('admin.deliveries', 'Deliveries', ('admin.deliveries',)),
                                          ('admin.people', 'People', ('admin.people',)),
                                          ('admin.tls_page', 'TLS certificate', ('admin.tls',)),
                                          ('admin.users', 'Users and access', ('admin.user',))] %}

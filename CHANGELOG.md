@@ -20,8 +20,9 @@ The first release.
   owners first, then the least busy.
 - **Branches:** stale branches with no PR; branches left after a merged or
   closed PR, or pushed to after their merge. Flagged only, never deleted.
-- **My work:** reviews waiting on you, your open PRs and what they need next,
-  your branches to tidy, and your snoozed reminders.
+- **My work** (in the menu under your name, with a count of reviews waiting):
+  reviews waiting on you, your open PRs and what they need next, your
+  branches to tidy, and your snoozed reminders.
 - **Teams and Slack:**
   - events when a PR opens, gets a review, or merges or closes,
   - reminders in working hours, each with a snooze button,
@@ -30,7 +31,7 @@ The first release.
   - @mentions through the People page.
 - **Metrics:** time to first review and to merge, merges per week, and daily
   trends.
-- **MVP** (a tab under Metrics): 7-day leaderboards for reviews, merges, branch prunes and PRs
+- **MVP:** 7-day leaderboards for reviews, merges, branch prunes and PRs
   raised, with an optional weekly post.
 - **Access:** admin, member and viewer roles; local accounts with one-time
   setup links; sign in with GitHub, with roles from GitHub teams.
@@ -39,6 +40,8 @@ The first release.
   - secrets sealed with AES-256-GCM, with a rotatable key kept apart from the database,
   - fail-closed defaults,
   - CI with pip-audit and gitleaks.
+- **Deliveries** (under Settings): every message and its result, scans, and
+  webhook events.
 - **Housekeeping:** retention for closed PRs, messages and scans.
 
 [0.1.0]: https://github.com/chrisnock-personal/branchwarden/releases/tag/v0.1.0

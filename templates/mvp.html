@@ -3,7 +3,6 @@
 {% macro who(login) %}{{ names.get(login) or login }}{% endmacro %}
 {% block body %}
 <main>
-  {{ stats_tabs('mvp') }}
   <div class="page-head">
     <div>
       <h1>MVP</h1>

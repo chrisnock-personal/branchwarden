@@ -744,6 +744,29 @@ def rule_save(key: str):
     return redirect(url_for("admin.notifications") + f"#rule-{key}")
 
 
+# ─── Settings: deliveries ───────────────────────────────────────────────────
+
+@bp.get("/settings/deliveries")
+def deliveries():
+    status = request.args.get("status", "all")
+    with db.get_conn() as conn:
+        where = "" if status == "all" else "WHERE n.status = %s"
+        rows = db.rows(conn, f"""SELECT n.*, c.name AS channel_name, c.kind AS channel_kind
+                                   FROM notifications n JOIN channels c ON c.id = n.channel_id {where}
+                                  ORDER BY n.id DESC LIMIT 200""", (status,) if where else None)
+        counts = {r["status"]: r["n"] for r in db.rows(
+            conn, "SELECT status, COUNT(*) AS n FROM notifications GROUP BY 1")}
+        chans = notify.channel_health(conn)
+        scans = db.rows(conn, "SELECT * FROM scan_log ORDER BY id DESC LIMIT 30")
+        hooks = db.rows(conn, "SELECT * FROM webhook_log ORDER BY id DESC LIMIT 30")
+    for r in rows:
+        p = r["payload"]
+        r["subject"] = p.get("pr") or p.get("title") or ""
+        r["heading"] = p.get("heading", "")
+    return render_template("deliveries.html", rows=rows, status=status, counts=counts, channels=chans,
+                           scans=scans, hooks=hooks)
+
+
 # ─── Settings: people ───────────────────────────────────────────────────────
 
 @bp.get("/settings/people")

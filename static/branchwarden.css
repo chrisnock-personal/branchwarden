@@ -367,9 +367,9 @@ nav.sections a { padding: 10px 12px; }
 .mvp-rank .fill { display: block; height: 6px; border-radius: 999px; background: var(--bar); }
 .mvp-rank .v { text-align: right; font-variant-numeric: tabular-nums; color: var(--text2); }
 .mvp-note { margin: auto 20px 16px; padding: 10px 12px; border-radius: 10px; background: var(--warn-bg); font-size: 12px; }
-/* With the full nav, mid-width screens show search as an icon that opens on click or focus. */
+/* On narrower screens, search is an icon that opens on click or focus. */
 .search-icon { display: grid; place-items: center; cursor: pointer; min-height: 42px; }
-@media (min-width: 900px) and (max-width: 1440px) {
+@media (min-width: 900px) and (max-width: 1100px) {
   header.top .tools .search { flex: 0 0 44px; min-width: 44px; padding: 0 13px; transition: flex-basis .15s; }
   header.top .tools .search input { width: 0; flex: 0 0 0; }
   header.top .tools .search:focus-within { flex-basis: 220px; }
@@ -378,3 +378,18 @@ nav.sections a { padding: 10px 12px; }
 .app-foot { max-width: 1360px; margin: 0 auto; padding: 0 clamp(16px, 3vw, 32px) 24px; font-size: 12px; color: var(--muted); }
 .app-foot a { color: var(--muted); }
 main > nav.seg { align-self: flex-start; }
+
+/* ─── The menu under your name ───────────────────────────────────────────── */
+.who-menu { position: relative; }
+.who-menu > summary { list-style: none; cursor: pointer; }
+.who-menu > summary::-webkit-details-marker { display: none; }
+.who-menu[open] > summary { border-color: var(--border2); background: var(--surface2); }
+.who-menu .avatar { position: relative; }
+.who-count { position: absolute; top: -4px; right: -6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--warn); color: var(--on-accent); font-size: 11px; font-weight: 700; display: grid; place-items: center; }
+.who-menu .menu { position: absolute; right: 0; top: calc(100% + 8px); width: 290px; background: var(--surface); border: 1px solid var(--border2); border-radius: 14px; padding: 8px; display: flex; flex-direction: column; gap: 2px; z-index: 20; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35); }
+.who-menu .menu a, .who-menu .menu button { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 44px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: var(--text); font: inherit; font-size: 14px; text-decoration: none; cursor: pointer; text-align: left; }
+.who-menu .menu a:hover, .who-menu .menu button:hover, .who-menu .menu a[aria-current] { background: var(--surface2); }
+.who-menu .menu form { margin: 0; }
+.who-menu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 0; }
+.menu-meta { font-size: 12px; color: var(--muted); padding: 6px 12px 8px; }
+.menu-pill { font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; color: var(--warn); background: var(--warn-bg); white-space: nowrap; }

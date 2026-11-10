@@ -24,12 +24,6 @@
 {% macro brand_mark(size=32) %}
 <svg width="{{ size }}" height="{{ size }}" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="25" fill="none" stroke="var(--mark)" stroke-width="4.5"/><path d="M26 22 V42 M40 28 C40 36 26 34 26 40" fill="none" stroke="var(--mark)" stroke-width="4" stroke-linecap="round"/><circle cx="26" cy="19" r="4.5" fill="var(--mark)"/><circle cx="26" cy="45" r="4.5" fill="var(--mark)"/><circle cx="40" cy="24" r="4.5" fill="var(--mark-north)"/></svg>
 {% endmacro %}
-{% macro stats_tabs(current) %}
-<nav class="seg" aria-label="Metrics pages">
-  <a class="{{ 'on' if current == 'metrics' }}" href="{{ url_for('metrics_page') }}" {% if current == 'metrics' %}aria-current="page"{% endif %}>Review metrics</a>
-  <a class="{{ 'on' if current == 'mvp' }}" href="{{ url_for('mvp_page') }}" {% if current == 'mvp' %}aria-current="page"{% endif %}>MVP</a>
-</nav>
-{% endmacro %}
 {% macro csrf() %}<input type="hidden" name="csrf" value="{{ csrf_token() }}">{% endmacro %}
 {% macro flashes() %}
   {% for category, message in get_flashed_messages(with_categories=true) %}
@@ -42,11 +36,10 @@
   {% set ep = request.endpoint or '' %}
   <nav class="sections" aria-label="Sections">
     <a href="{{ url_for('index') }}" {% if ep == 'index' %}class="current" aria-current="page"{% endif %}>Overview</a>
-    <a href="{{ url_for('my_work') }}" {% if ep == 'my_work' %}class="current" aria-current="page"{% endif %}>My work</a>
     <a href="{{ url_for('pulls') }}" {% if ep == 'pulls' %}class="current" aria-current="page"{% endif %}>Pull requests</a>
     <a href="{{ url_for('branches') }}" {% if ep == 'branches' %}class="current" aria-current="page"{% endif %}>Branches</a>
-    <a href="{{ url_for('metrics_page') }}" {% if ep in ('metrics_page', 'mvp_page') %}class="current" aria-current="page"{% endif %}>Metrics</a>
-    <a href="{{ url_for('deliveries') }}" {% if ep == 'deliveries' %}class="current" aria-current="page"{% endif %}>Deliveries</a>
+    <a href="{{ url_for('metrics_page') }}" {% if ep == 'metrics_page' %}class="current" aria-current="page"{% endif %}>Metrics</a>
+    <a href="{{ url_for('mvp_page') }}" {% if ep == 'mvp_page' %}class="current" aria-current="page"{% endif %}>MVP</a>
     {% if current_user and current_user.role == 'admin' %}
     <a href="{{ url_for('admin.github') }}" {% if request.blueprint == 'admin' %}class="current" aria-current="page"{% endif %}>Settings</a>
     {% endif %}
@@ -58,15 +51,23 @@
     </form>
     {{ theme_button() }}
     {% if current_user %}
-    <div class="who">
-      <span class="avatar" aria-hidden="true">{{ current_user.name[:1]|upper }}</span>
-      <span class="who-name">{{ current_user.name }}</span>
-      <span class="badge role-{{ current_user.role }}">{{ current_user.role|capitalize }}</span>
-      <form method="post" action="{{ url_for('admin.logout') }}">
-        {{ csrf() }}
-        <button type="submit" class="link-btn">Sign out</button>
-      </form>
-    </div>
+    <details class="who-menu">
+      <summary class="who" aria-label="Your menu">
+        <span class="avatar" aria-hidden="true">{{ current_user.name[:1]|upper }}{% if reviews_waiting %}<span class="who-count">{{ reviews_waiting }}</span>{% endif %}</span>
+        <span class="who-name">{{ current_user.name }}</span>
+        <span class="badge role-{{ current_user.role }}">{{ current_user.role|capitalize }}</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </summary>
+      <div class="menu" role="menu">
+        <div class="menu-meta">Signed in as {{ current_user.name }}{% if current_user.github_login %} · GitHub {{ current_user.github_login }}{% endif %}</div>
+        <a role="menuitem" href="{{ url_for('my_work') }}" {% if ep == 'my_work' %}aria-current="page"{% endif %}>My work{% if reviews_waiting %} <span class="menu-pill">{{ reviews_waiting }} review{{ 's' if reviews_waiting != 1 }} waiting</span>{% endif %}</a>
+        <hr>
+        <form method="post" action="{{ url_for('admin.logout') }}">
+          {{ csrf() }}
+          <button type="submit" role="menuitem">Sign out</button>
+        </form>
+      </div>
+    </details>
     {% endif %}
   </div>
 </header>
@@ -81,6 +82,13 @@
       root.dataset.theme = next;
       try { localStorage.setItem("branchwarden-theme", next); } catch (e) {}
     });
+  });
+  // Close the user menu on a click elsewhere or Escape.
+  document.addEventListener("click", function (e) {
+    document.querySelectorAll("details.who-menu[open]").forEach(function (d) { if (!d.contains(e.target)) d.open = false; });
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") document.querySelectorAll("details.who-menu[open]").forEach(function (d) { d.open = false; });
   });
   document.querySelectorAll("select[data-autosubmit]").forEach(function (s) {
     s.addEventListener("change", function () { s.form.submit(); });

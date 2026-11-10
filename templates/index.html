@@ -79,7 +79,7 @@
 
     <div class="side">
       <div class="card panel" id="deliveries">
-        <div class="panel-head"><h2>Delivery channels</h2>
+        <div class="panel-head"><h2>Delivery channels</h2>{% if current_user.role == 'admin' %}<a href="{{ url_for('admin.deliveries') }}" style="font-size: 13px">Deliveries</a>{% endif %}
           {% set failing = channels|selectattr('status', 'equalto', 'failing')|list %}
           {% if failing %}<span class="badge bad">{{ failing|length }} failing</span>{% endif %}
         </div>

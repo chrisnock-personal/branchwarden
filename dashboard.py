@@ -21,6 +21,7 @@ import re
 import os
 import time
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 from urllib.parse import urlencode
 
 from dotenv import load_dotenv
@@ -87,9 +88,25 @@ def can_act() -> bool:
     return bool(g.get("user")) and g.user["role"] in ("admin", "member")
 
 
+def _reviews_waiting() -> Optional[int]:
+    """How many open PRs ask this person for a review, for the badge on their menu."""
+    login = (g.get("user") or {}).get("github_login")
+    if not login:
+        return None
+    try:
+        with db.get_conn() as conn:
+            return db.one(conn, """SELECT COUNT(*) AS n FROM pull_requests p JOIN repos r ON r.id = p.repo_id
+                                    WHERE p.state = 'open' AND NOT p.draft AND r.included
+                                      AND p.requested @> %s AND COALESCE(p.author, '') <> %s""",
+                          (Json([{"user": login}]), login))["n"]
+    except Exception:  # never let the badge break a page
+        return None
+
+
 @app.context_processor
 def _globals():
-    return {"can_act": can_act(), "now": datetime.now(timezone.utc), "version": VERSION}
+    return {"can_act": can_act(), "now": datetime.now(timezone.utc), "version": VERSION,
+            "reviews_waiting": _reviews_waiting() if g.get("user") else None}
 
 
 @app.template_filter("ago")
@@ -572,23 +589,8 @@ def unignore_branch(repo_id: int, name: str):
 
 @app.get("/deliveries")
 def deliveries():
-    status = request.args.get("status", "all")
-    with db.get_conn() as conn:
-        where = "" if status == "all" else "WHERE n.status = %s"
-        rows = db.rows(conn, f"""SELECT n.*, c.name AS channel_name, c.kind AS channel_kind
-                                   FROM notifications n JOIN channels c ON c.id = n.channel_id {where}
-                                  ORDER BY n.id DESC LIMIT 200""", (status,) if where else None)
-        counts = {r["status"]: r["n"] for r in db.rows(
-            conn, "SELECT status, COUNT(*) AS n FROM notifications GROUP BY 1")}
-        channels = notify.channel_health(conn)
-        scans = db.rows(conn, "SELECT * FROM scan_log ORDER BY id DESC LIMIT 30")
-        hooks = db.rows(conn, "SELECT * FROM webhook_log ORDER BY id DESC LIMIT 30")
-    for r in rows:
-        p = r["payload"]
-        r["subject"] = p.get("pr") or p.get("title") or ""
-        r["heading"] = p.get("heading", "")
-    return render_template("deliveries.html", rows=rows, status=status, counts=counts, channels=channels,
-                           scans=scans, hooks=hooks)
+    """Old address: Deliveries now lives under Settings."""
+    return redirect(url_for("admin.deliveries", **request.args))
 
 
 @app.post("/scan")

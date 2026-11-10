@@ -1,16 +1,13 @@
-{% extends "base.html" %}
+{% extends "settings_base.html" %}
 {% block title %}Deliveries · Branchwarden{% endblock %}
 {% block head %}<meta http-equiv="refresh" content="60">{% endblock %}
-{% block body %}
-<main>
-  <div class="page-head">
-    <div>
-      <h1>Deliveries</h1>
-      <p>Messages to Teams and Slack, scans, and webhook events from GitHub</p>
-    </div>
-  </div>
-  {{ flashes() }}
-
+{% block heading %}
+<div>
+  <h1>Deliveries</h1>
+  <p class="lede">Messages to Teams and Slack, scans, and webhook events from GitHub.</p>
+</div>
+{% endblock %}
+{% block content %}
   <section class="health">
     <div class="card panel">
       <div class="panel-head"><h2>Channels</h2></div>
@@ -80,5 +77,4 @@
     </table></div>
     {% else %}<div class="empty">No scans yet.</div>{% endif %}
   </section>
-</main>
 {% endblock %}
