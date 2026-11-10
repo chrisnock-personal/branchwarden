@@ -149,6 +149,10 @@ def _error(exc):
                            message=message or getattr(exc, "description", "")), exc.code
 
 
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
 # ─── Overview ───────────────────────────────────────────────────────────────
 
 def _watching(conn) -> dict:
@@ -190,7 +194,7 @@ def index():
     left = [b for b in branches if b["status"] in ("left_merged", "left_closed", "pushed_after_merge")]
     kpis = [
         {"label": "Open pull requests", "value": len(prs), "tone": "",
-         "note": f"in {len({p['repo_id'] for p in prs})} repos · {sum(1 for p in prs if p['draft'])} drafts"},
+         "note": f"in {len({p['repo_id'] for p in prs})} repos · {_plural(sum(1 for p in prs if p['draft']), 'draft')}"},
         {"label": "Needs review", "value": len(awaiting), "tone": "tone-warn" if awaiting else "",
          "note": f"{sum(1 for p in awaiting if p['waiting_seconds'] > day.total_seconds())} waiting over 24 h"},
         {"label": "Changes requested", "value": len(changes), "tone": "",

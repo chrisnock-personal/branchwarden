@@ -753,7 +753,7 @@ def deliveries():
         where = "" if status == "all" else "WHERE n.status = %s"
         rows = db.rows(conn, f"""SELECT n.*, c.name AS channel_name, c.kind AS channel_kind
                                    FROM notifications n JOIN channels c ON c.id = n.channel_id {where}
-                                  ORDER BY n.id DESC LIMIT 200""", (status,) if where else None)
+                                  ORDER BY n.created_at DESC, n.id DESC LIMIT 200""", (status,) if where else None)
         counts = {r["status"]: r["n"] for r in db.rows(
             conn, "SELECT status, COUNT(*) AS n FROM notifications GROUP BY 1")}
         chans = notify.channel_health(conn)

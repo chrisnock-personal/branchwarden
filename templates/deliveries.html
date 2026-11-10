@@ -8,7 +8,7 @@
 </div>
 {% endblock %}
 {% block content %}
-  <section class="health">
+  <section style="display: flex; flex-direction: column; gap: 22px">
     <div class="card panel">
       <div class="panel-head"><h2>Channels</h2></div>
       {% for c in channels %}
@@ -21,7 +21,7 @@
     <div class="card panel">
       <div class="panel-head"><h2>Webhook events</h2><span class="hint">last 30</span></div>
       {% if hooks %}
-      <div class="scroll"><table>
+      <div class="scroll"><table style="min-width: 560px">
         <thead><tr><th>Received</th><th>Event</th><th>Repository</th><th>Result</th></tr></thead>
         <tbody>{% for h in hooks %}<tr>
           <td class="nowrap sub">{{ h.received_at.strftime('%d %b %H:%M:%S') }}</td>
