@@ -17,6 +17,9 @@ organisation or account:
   the least busy person in a pool.
 - **Metrics:** time to first review, time to merge, merges per week, and daily
   trends of PRs needing review and stale branches, per repo or overall.
+- **MVP:** for the last 7 days (or the 7 before), who submitted the most
+  reviews, merged the most PRs, deleted the most branches and opened the most
+  PRs, with team totals. An optional weekly post sends the MVPs to Teams and Slack.
 - **Notifications:** posted to Microsoft Teams (Workflows webhooks, Adaptive Cards) and
   Slack (incoming webhooks, Block Kit) when PRs open, are reviewed, merge or
   close. Reminders go out in working hours, plus a weekly digest of branches to tidy up.
@@ -154,6 +157,15 @@ GitHub Enterprise Server works too: set the API address to `https://host/api/v3`
   - The channel is told who was picked and why.
 - **Weekly digest:** stale branches and branches left behind, per channel's
   repos, with each branch's last committer @mentioned.
+- **Weekly MVP post** (off by default): each MVP board's winner and the next
+  two, at a set day and time (Fridays 16:00 by default).
+  - **Reviews** counts PRs reviewed for other people, not every comment.
+  - **Merges** counts who pressed merge.
+  - **PRs raised** counts PRs opened.
+  - **Branch prunes** counts branch deletions. Who deleted a branch is only known
+    from the GitHub App's `delete` webhook. A deletion seen only by a scan counts
+    in the team total, but for nobody by name.
+  - Bots are left out of every board.
 
 **Settings › People** matches GitHub logins to a Teams user principal name and
 a Slack member ID, so @mentions reach the right person. Anyone without a match
@@ -251,7 +263,7 @@ The files:
 | `analysis.py` | PR states, branch statuses, CODEOWNERS, picking reviewers and working-hours maths. No I/O |
 | `scanner.py` | The GraphQL queries and turning a scan into rows and events |
 | `rules.py` | Events, auto-assign, reminders and the digest |
-| `metrics.py`, `housekeeping.py` | The metrics page; retention and the daily snapshot |
+| `metrics.py`, `mvp.py`, `housekeeping.py` | The metrics and MVP pages; retention and the daily snapshot |
 | `ghlogin.py` | Sign in with GitHub |
 | `notify.py` | Routing, rendering for Teams and Slack, delivery and Slack threads |
 | `github.py` | App and token clients |

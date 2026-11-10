@@ -127,6 +127,7 @@ def tick(state: dict, *, force_full: bool = False) -> None:
                 log.info("Auto-assigned reviewers on %d pull request%s", assigned, "s" if assigned != 1 else "")
             n = rules.run_reminders(conn, values, now)
             n += rules.run_digest(conn, values, now)
+            n += rules.run_mvp_post(conn, values, now)
             conn.commit()
             if n:
                 log.info("Queued %d reminder and digest messages", n)

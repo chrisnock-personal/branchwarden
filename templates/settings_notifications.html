@@ -105,7 +105,7 @@
   <div class="card channel-card {{ 'open' if is_open }}" id="rule-{{ r.key }}">
     <div class="row-head">
       <div class="title"><strong>{{ r.name }}</strong><span>{{ r.desc }}</span></div>
-      <div class="acts"><span class="badge {{ {'event': 'info', 'assign': 'good', 'reminder': 'warn', 'digest': 'muted'}[r.kind] }}">{{ {'assign': 'Action'}.get(r.kind, r.kind|capitalize) }}</span><span class="badge muted">{{ r.to }}</span></div>
+      <div class="acts"><span class="badge {{ {'event': 'info', 'assign': 'good', 'reminder': 'warn', 'digest': 'muted', 'post': 'muted'}[r.kind] }}">{{ {'assign': 'Action', 'post': 'Weekly post'}.get(r.kind, r.kind|capitalize) }}</span><span class="badge muted">{{ r.to }}</span></div>
       {% if is_open %}<a class="btn small" href="{{ url_for('admin.notifications') }}#rule-{{ r.key }}">Close</a>{% else %}<a class="btn small" href="{{ url_for('admin.notifications', open=r.key) }}#rule-{{ r.key }}">Edit</a>{% endif %}
       <form method="post" action="{{ url_for('admin.rule_save', key=r.key) }}" class="inline">{{ csrf() }}<input type="hidden" name="toggle" value="1">
         <button type="submit" class="switch" aria-pressed="{{ 'true' if r.enabled else 'false' }}" aria-label="{{ r.name }} switched {{ 'on' if r.enabled else 'off' }}"></button></form>
@@ -131,16 +131,16 @@
         <div class="inline-form">Tell <select name="target" aria-label="Where">{% include "_targets.html" %}</select></div>
         <label class="check"><input type="checkbox" name="mention" value="1" {{ 'checked' if p.mention }}> @mention who was picked</label>
         <p class="hint">Runs in working hours only, once each time a PR is left without a reviewer. It writes to GitHub, so it's off until you switch it on.</p>
-      {% elif r.kind == 'digest' %}
+      {% elif r.kind in ('digest', 'post') %}
         <div class="inline-form">Every <select name="day" aria-label="Day">{% for d in days %}<option value="{{ d }}" {{ 'selected' if p.day == d }}>{{ d|capitalize }}day</option>{% endfor %}</select>
           at <input class="input num" name="time" value="{{ p.time }}" aria-label="Time"> (working-hours time zone), to <select name="target" aria-label="Where">{% include "_targets.html" %}</select></div>
-        <label class="check"><input type="checkbox" name="mention" value="1" {{ 'checked' if p.mention }}> @mention each stale branch's last committer</label>
+        <label class="check"><input type="checkbox" name="mention" value="1" {{ 'checked' if p.mention }}> {{ "@mention each stale branch's last committer" if r.kind == 'digest' else '@mention each MVP' }}</label>
       {% else %}
         <div class="inline-form">Post to <select name="target" aria-label="Where">{% include "_targets.html" %}</select></div>
         <label class="check"><input type="checkbox" name="mention" value="1" {{ 'checked' if p.mention }}> @mention {{ 'the requested reviewers' if r.key == 'opened' else 'the author' if r.key == 'review' else 'people' }}</label>
       {% endif %}
       <div class="actions">
-        {% if r.key == 'digest' %}<button class="btn small" name="send_now" value="1">Send it now</button>{% else %}<span></span>{% endif %}
+        {% if r.key in ('digest', 'mvp') %}<button class="btn small" name="send_now" value="1">Send it now</button>{% else %}<span></span>{% endif %}
         <div class="end"><button class="btn primary" type="submit">Save rule</button></div>
       </div>
     </form>

@@ -22,6 +22,7 @@ assignments      – reviewers Branchwarden or someone in the dashboard requeste
 snoozes          – reminders someone has put off for a PR
 threads          – the Slack message each PR's thread hangs off, per channel
 daily            – one row a day of headline counts, for the trend charts
+branch_deletions – branches that went, and who deleted them when a webhook said so
 settings, users, settings_log – see settings.py
 """
 
@@ -274,6 +275,17 @@ CREATE TABLE IF NOT EXISTS daily (
     left_branches   INTEGER NOT NULL
 );
 
+-- Branches that were deleted: from the App's delete webhook (who did it) or
+-- from a scan noticing one has gone (who is unknown). For the MVP page.
+CREATE TABLE IF NOT EXISTS branch_deletions (
+    id              SERIAL PRIMARY KEY,
+    full_name       TEXT NOT NULL,                 -- the repo, owner/name, lower case
+    branch          TEXT NOT NULL,
+    deleted_by      TEXT,                          -- GitHub login; NULL when only a scan saw it go
+    deleted_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_branch_deletions_at ON branch_deletions (deleted_at);
+
 -- Settings edited in the dashboard (see settings.py). Secrets are encrypted.
 CREATE TABLE IF NOT EXISTS settings (
     key             TEXT PRIMARY KEY,
@@ -351,6 +363,20 @@ def execute(conn, sql: str, params=None) -> int:
     with conn.cursor() as cur:
         cur.execute(sql, params)
         return cur.rowcount
+
+
+def record_deletion(conn, full_name: str, branch: str, by: str | None) -> None:
+    """Note a deleted branch once. A webhook (which knows who) and the next scan
+    (which doesn't) usually both see the same deletion: whichever comes second
+    only fills in who, if it can."""
+    row = one(conn, """SELECT id, deleted_by FROM branch_deletions WHERE full_name = lower(%s) AND branch = %s
+                        AND deleted_at > NOW() - INTERVAL '1 day' ORDER BY id DESC LIMIT 1""", (full_name, branch))
+    if row:
+        if by and not row["deleted_by"]:
+            execute(conn, "UPDATE branch_deletions SET deleted_by = lower(%s) WHERE id = %s", (by, row["id"]))
+        return
+    execute(conn, "INSERT INTO branch_deletions (full_name, branch, deleted_by) VALUES (lower(%s), %s, lower(%s))",
+            (full_name, branch, by))
 
 
 def request_scan(conn, full_name: str, reason: str) -> None:

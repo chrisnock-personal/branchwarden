@@ -698,6 +698,12 @@ def rule_save(key: str):
             settings.history_add(conn, _actor(), f"Rule {rule.name}: switched {'off' if current['enabled'] else 'on'}")
             flash(f"{rule.name} switched {'off' if current['enabled'] else 'on'}.", "ok")
             return redirect(url_for("admin.notifications") + f"#rule-{key}")
+        if form.get("send_now") and key == "mvp":
+            n = rules.run_mvp_post(conn, settings.load(conn), force=True)
+            flash(f"MVP post queued for {n} channel{'s' if n != 1 else ''}." if n
+                  else "Nothing to post: no reviews, merges, prunes or new PRs in the last 7 days, or no channels.",
+                  "ok" if n else "info")
+            return redirect(url_for("admin.notifications") + f"#rule-{key}")
         if form.get("send_now") and key == "digest":
             n = rules.run_digest(conn, settings.load(conn), force=True)
             flash(f"Digest queued for {n} channel{'s' if n != 1 else ''}." if n
@@ -726,7 +732,7 @@ def rule_save(key: str):
                      pool=settings.join_list(e.lower().lstrip("@") for e in settings.split_list(form.get("pool", ""))),
                      repos=settings.join_list(settings.split_list(form.get("repos", ""))),
                      skip_label=form.get("skip_label", "").strip())
-        elif rule.kind == "digest":
+        elif rule.kind in ("digest", "post"):
             if form.get("day") not in analysis.DAYS or not HHMM.match(form.get("time", "")):
                 flash("Pick a day and a time (HH:MM).", "bad")
                 return redirect(url_for("admin.notifications", open=key) + f"#rule-{key}")

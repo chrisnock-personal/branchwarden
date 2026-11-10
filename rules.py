@@ -31,7 +31,7 @@ log = logging.getLogger("branchwarden.rules")
 @dataclass(frozen=True)
 class Rule:
     key: str
-    kind: str            # event | assign | reminder | digest
+    kind: str            # event | assign | reminder | digest | post
     name: str
     defaults: dict
     enabled: bool = True
@@ -56,6 +56,8 @@ RULES = (
          {**REMINDER_DEFAULTS, "after": 2, "unit": "days", "repeat": 1, "max": 2}, enabled=False),
     Rule("digest", "digest", "Weekly stale-branch digest",
          {"day": "mon", "time": "09:00", "target": "all", "mention": True, "limit": 10}),
+    Rule("mvp", "post", "Weekly MVP post",
+         {"day": "fri", "time": "16:00", "target": "all", "mention": True}, enabled=False),
 )
 RULE_BY_KEY = {r.key: r for r in RULES}
 
@@ -93,6 +95,9 @@ def describe(rule: dict, channel_names: dict[int, str]) -> str:
         where = f" in {p['repos']}" if p.get("repos") else ""
         return (f"After {_amount(p['after'], p['unit'])} with nobody asked{where}: requests {count} "
                 f"reviewer{'s' if count != 1 else ''} on GitHub, from {' then '.join(source)}")
+    if rule["kind"] == "post":
+        return (f"{p['day'].capitalize()}days at {p['time']}: the last 7 days' MVPs for reviews, merges, "
+                "branch prunes and PRs raised, with the top three of each")
     if rule["kind"] == "digest":
         return f"{p['day'].capitalize()}days at {p['time']}: stale branches and branches left after a PR, per repo"
     who = {"no_reviewer": "nudges the channel", "waiting": "reminds the requested reviewers",
@@ -497,3 +502,18 @@ def run_auto_assign(conn, values: dict, now: Optional[datetime] = None, connecti
         notify.enqueue(conn, chans, "assigned", msg, pr["id"])
         done += 1
     return done
+
+
+# ─── Weekly MVP post ────────────────────────────────────────────────────────
+
+def run_mvp_post(conn, values: dict, now: Optional[datetime] = None, force: bool = False) -> int:
+    import mvp
+    now = now or datetime.now(timezone.utc)
+    rule = load(conn)["mvp"]
+    if not force and (not rule["enabled"] or not digest_due(rule, now, work_hours(values))):
+        return 0
+    p = rule["params"]
+    msg = mvp.post_message(mvp.compute(conn, "this", now), _link(values, "/mvp"), p.get("mention", True))
+    queued = notify.enqueue(conn, notify.channels_for(conn, str(p.get("target", "all"))), "mvp", msg) if msg else 0
+    db.execute(conn, "UPDATE rules SET last_run_at = %s WHERE key = 'mvp'", (now,))
+    return queued

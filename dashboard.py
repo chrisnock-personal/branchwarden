@@ -33,6 +33,7 @@ import analysis  # noqa: E402
 import data  # noqa: E402
 import db  # noqa: E402
 import metrics  # noqa: E402
+import mvp  # noqa: E402
 import notify  # noqa: E402
 import rules  # noqa: E402
 import settings  # noqa: E402
@@ -457,6 +458,22 @@ def metrics_page():
     return render_template("metrics.html", m=m, periods=metrics.PERIODS, days=days, repo=repo, repos=repos)
 
 
+# ─── MVP ────────────────────────────────────────────────────────────────────
+
+@app.get("/mvp")
+def mvp_page():
+    period = "prev" if request.args.get("period") == "prev" else "this"
+    with db.get_conn() as conn:
+        result = mvp.compute(conn, period)
+        names = {p["login"]: p["name"] for p in db.rows(conn, "SELECT login, name FROM people WHERE name <> ''")}
+        app_on = db.one(conn, "SELECT COUNT(*) AS n FROM webhook_log WHERE event = 'delete' AND status = 202 "
+                              "AND received_at > NOW() - INTERVAL '30 days'")["n"] > 0
+        repo_count = db.one(conn, "SELECT COUNT(*) AS n FROM repos WHERE included")["n"]
+        post = rules.load(conn)["mvp"]
+    return render_template("mvp.html", r=result, period=period, names=names, app_on=app_on,
+                           repo_count=repo_count, post=post)
+
+
 # ─── Branches ───────────────────────────────────────────────────────────────
 
 @app.get("/branches")
@@ -577,6 +594,8 @@ def github_webhook():
         if event == "ping":
             status = 200
         elif event in WEBHOOK_EVENTS and repo:
+            if event == "delete" and payload.get("ref_type") == "branch" and payload.get("ref"):
+                db.record_deletion(conn, repo, payload["ref"], (payload.get("sender") or {}).get("login"))
             db.request_scan(conn, repo, f"webhook {event}{'.' + action if action else ''}")
             status = 202
         db.execute(conn, "INSERT INTO webhook_log (event, action, repo, status) VALUES (%s, %s, %s, %s)",

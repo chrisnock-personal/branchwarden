@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}MVP · Branchwarden{% endblock %}
+{% macro who(login) %}{{ names.get(login) or login }}{% endmacro %}
+{% block body %}
+<main>
+  <div class="page-head">
+    <div>
+      <h1>MVP</h1>
+      <p>Who did the most from {{ r.start.strftime('%d %b %H:%M') }} to {{ r.end.strftime('%d %b %H:%M') }} UTC · across {{ repo_count }} repositor{{ 'y' if repo_count == 1 else 'ies' }}</p>
+    </div>
+    <div class="seg" role="group" aria-label="Period">
+      <a class="{{ 'on' if period == 'this' }}" href="{{ url_for('mvp_page') }}" {% if period == 'this' %}aria-current="true"{% endif %}>Last 7 days</a>
+      <a class="{{ 'on' if period == 'prev' }}" href="{{ url_for('mvp_page', period='prev') }}" {% if period == 'prev' %}aria-current="true"{% endif %}>Previous 7 days</a>
+    </div>
+  </div>
+
+  <section class="kpis" aria-label="Team totals">
+    {% for key, label in [('reviews', 'Reviews'), ('merges', 'Merged'), ('prunes', 'Branches pruned'), ('raised', 'PRs opened')] %}
+    <div class="card kpi"><div class="label">{{ label }}</div><div class="row"><span class="value">{{ r.totals[key] }}</span></div>
+      <span class="note">{% if r.people[key] %}by {{ r.people[key] }} {{ 'person' if r.people[key] == 1 else 'people' }}{% elif key == 'prunes' and r.totals[key] %}by people unknown{% else %}nobody yet{% endif %}</span></div>
+    {% endfor %}
+  </section>
+
+  <section class="mvp-boards" aria-label="Leaderboards">
+    {% for b in r.boards %}
+    <div class="card mvp-board">
+      <div class="mvp-head"><h2>{{ b.title }}</h2><small>{{ b.sub }}</small></div>
+      {% if b.top %}
+      <div class="mvp-top">
+        <span class="mvp-av" aria-hidden="true">{{ b.top[0][:2]|upper }}</span>
+        <span class="mvp-txt"><b>{{ who(b.top[0]) }}</b><span>MVP · {{ b.top_text }}</span></span>
+        <span class="mvp-count">{{ b.top[1] }}</span>
+      </div>
+      {% for x in b.rest %}
+      <div class="mvp-rank">
+        <span class="n">{{ x.n }}</span>
+        <span class="meter"><span>{{ who(x.login) }}</span><span class="track"><span class="fill" style="width: {{ x.w }}%"></span></span></span>
+        <span class="v">{{ x.v }}</span>
+      </div>
+      {% endfor %}
+      {% else %}
+      <div class="empty">{{ 'Nobody known yet.' if b.key == 'prunes' and r.totals.prunes else 'Nothing in this period.' }}</div>
+      {% endif %}
+      {% if b.key == 'prunes' and (not app_on or b.unattributed) %}
+      <div class="mvp-note">{% if not app_on %}Who deleted a branch is only known from the GitHub App's delete webhook, which isn't arriving.{% else %}Some deletions were only seen by a scan, so they count in the total but for nobody by name.{% endif %}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </section>
+
+  <p class="hint">Reviews count PRs reviewed for other people; merges count who pressed merge; branch prunes count branches deleted; PRs raised count PRs opened. Bots are left out.
+    {% if current_user.role == 'admin' %}The weekly MVP post to Teams and Slack is {{ 'on' if post.enabled else 'off' }}: <a href="{{ url_for('admin.notifications', open='mvp') }}#rule-mvp">change it</a>.{% endif %}</p>
+</main>
+{% endblock %}

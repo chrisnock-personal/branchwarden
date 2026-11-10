@@ -39,6 +39,7 @@
     <a href="{{ url_for('pulls') }}" {% if ep == 'pulls' %}class="current" aria-current="page"{% endif %}>Pull requests</a>
     <a href="{{ url_for('branches') }}" {% if ep == 'branches' %}class="current" aria-current="page"{% endif %}>Branches</a>
     <a href="{{ url_for('metrics_page') }}" {% if ep == 'metrics_page' %}class="current" aria-current="page"{% endif %}>Metrics</a>
+    <a href="{{ url_for('mvp_page') }}" {% if ep == 'mvp_page' %}class="current" aria-current="page"{% endif %}>MVP</a>
     <a href="{{ url_for('deliveries') }}" {% if ep == 'deliveries' %}class="current" aria-current="page"{% endif %}>Deliveries</a>
     {% if current_user and current_user.role == 'admin' %}
     <a href="{{ url_for('admin.github') }}" {% if request.blueprint == 'admin' %}class="current" aria-current="page"{% endif %}>Settings</a>

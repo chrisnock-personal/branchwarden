@@ -292,7 +292,12 @@ def _upsert_pr(conn, repo_id: int, pr: dict) -> int:
         return cur.fetchone()[0]
 
 
-def _store_branches(conn, repo_id: int, branches: list[dict]) -> None:
+def _store_branches(conn, repo_id: int, branches: list[dict], full_name: str = "", first: bool = False) -> None:
+    if full_name and not first:
+        names = {b["name"] for b in branches}
+        for gone in db.rows(conn, "SELECT name FROM branches WHERE repo_id = %s", (repo_id,)):
+            if gone["name"] not in names:
+                db.record_deletion(conn, full_name, gone["name"], None)
     cols = ", ".join(BRANCH_COLUMNS)
     sets = ", ".join(f"{c} = EXCLUDED.{c}" for c in BRANCH_COLUMNS)
     with conn.cursor() as cur:
@@ -349,7 +354,7 @@ def scan_repo(conn, client: Client, repo: dict) -> tuple[list[dict], int, int]:
             if not first:
                 events.append({"kind": state, "pr_id": before[n]["id"]})
 
-    _store_branches(conn, repo["id"], branches)
+    _store_branches(conn, repo["id"], branches, repo["full_name"], first)
     db.execute(conn, """UPDATE repos SET codeowners = %s, scanned_once = TRUE, last_scan_at = NOW(),
                                last_error = NULL WHERE id = %s""", (codeowners or None, repo["id"]))
     return events, len(prs), len(branches)
