@@ -353,3 +353,20 @@ def choose_reviewers(groups: list[tuple[str, list[str]]], *, count: int, exclude
             picked.append((p, why))
             taken.add(p)
     return picked
+
+
+def author_next_step(pr: dict) -> Optional[str]:
+    """What the author should do next, or None when it's waiting on reviewers."""
+    if pr.get("draft"):
+        return "Finish it and mark it ready for review"
+    if pr.get("mergeable") == "CONFLICTING":
+        return "Resolve the merge conflicts"
+    if pr.get("ci_state") in ("FAILURE", "ERROR"):
+        return "Fix the failing checks"
+    if pr.get("review_decision") == "CHANGES_REQUESTED":
+        return "Make the requested changes"
+    if pr.get("review_decision") == "APPROVED":
+        return "Merge it, or close it"
+    if not pr.get("requested") and not pr.get("reviews"):
+        return "Ask someone to review it"
+    return None

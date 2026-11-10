@@ -15,6 +15,10 @@ organisation or account:
   from CODEOWNERS and who has reviewed in that repo recently. An optional rule
   assigns one automatically when nobody has been asked: code owners first, then
   the least busy person in a pool.
+- **My work:** what's waiting on you: reviews asked of you (oldest first),
+  your open PRs and what each needs next, your branches to tidy, and your
+  snoozed reminders. People who sign in with GitHub land on it. Local accounts
+  can give their GitHub login on the page itself.
 - **Metrics:** time to first review, time to merge, merges per week, and daily
   trends of PRs needing review and stale branches, per repo or overall.
 - **MVP:** for the last 7 days (or the 7 before), who submitted the most
@@ -247,6 +251,12 @@ volume with the database: without it, stored secrets can't be read.
 | `TLS_HOSTNAMES` | | extra names/IPs for the self-signed certificate |
 | `BRANCHWARDEN_TLS` | `on` | `off` only behind a TLS proxy (with `BRANCHWARDEN_BEHIND_PROXY=true`) |
 | `GITHUB_TARGETS`, `GITHUB_TOKEN`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_FILE`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_API_URL`, `PUBLIC_URL` | | imported on the first start only, then edited in the dashboard |
+
+## Releases
+
+The version is in `version.py`. It's shown at the foot of every page, in
+`/healthz`, and in the User-Agent sent to GitHub. Each release gets a
+[CHANGELOG](CHANGELOG.md) entry and a `vX.Y.Z` tag.
 
 ## Development
 

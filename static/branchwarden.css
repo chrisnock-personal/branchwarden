@@ -375,3 +375,6 @@ nav.sections a { padding: 10px 12px; }
   header.top .tools .search:focus-within { flex-basis: 220px; }
   header.top .tools .search:focus-within input { flex: 1 1 auto; width: auto; }
 }
+.app-foot { max-width: 1360px; margin: 0 auto; padding: 0 clamp(16px, 3vw, 32px) 24px; font-size: 12px; color: var(--muted); }
+.app-foot a { color: var(--muted); }
+main > nav.seg { align-self: flex-start; }

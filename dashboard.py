@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import os
 import time
 from datetime import datetime, timedelta, timezone
@@ -36,6 +37,7 @@ import metrics  # noqa: E402
 import mvp  # noqa: E402
 import notify  # noqa: E402
 import rules  # noqa: E402
+from version import VERSION  # noqa: E402
 import settings  # noqa: E402
 from admin import bp as admin_bp  # noqa: E402
 from github import Connections, GitHubError, verify_signature  # noqa: E402
@@ -87,7 +89,7 @@ def can_act() -> bool:
 
 @app.context_processor
 def _globals():
-    return {"can_act": can_act(), "now": datetime.now(timezone.utc)}
+    return {"can_act": can_act(), "now": datetime.now(timezone.utc), "version": VERSION}
 
 
 @app.template_filter("ago")
@@ -458,6 +460,32 @@ def metrics_page():
     return render_template("metrics.html", m=m, periods=metrics.PERIODS, days=days, repo=repo, repos=repos)
 
 
+# ─── My work ────────────────────────────────────────────────────────────────
+
+@app.get("/me")
+def my_work():
+    login = (g.user.get("github_login") or "").lower()
+    work = None
+    if login:
+        with db.get_conn() as conn:
+            work = data.my_work(conn, login, settings.load(conn))
+    return render_template("me.html", login=login, w=work, via_github=g.user.get("via_github"))
+
+
+@app.post("/me/login")
+def my_login():
+    if g.user.get("via_github"):
+        abort(400, "Your GitHub login comes from signing in with GitHub.")
+    login = request.form.get("login", "").strip().lstrip("@")
+    if login and not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})", login):
+        flash("That isn't a GitHub login.", "bad")
+        return redirect(url_for("my_work"))
+    with db.get_conn() as conn:
+        settings.set_my_login(conn, g.user["id"], login)
+    flash(f"My work now follows {login}." if login else "GitHub login removed.", "ok")
+    return redirect(url_for("my_work"))
+
+
 # ─── MVP ────────────────────────────────────────────────────────────────────
 
 @app.get("/mvp")
@@ -610,8 +638,8 @@ def healthz():
         with db.get_conn() as conn:
             db.one(conn, "SELECT 1 AS x")
     except Exception:
-        return {"ok": False}, 503
-    return {"ok": True}
+        return {"ok": False, "version": VERSION}, 503
+    return {"ok": True, "version": VERSION}
 
 
 def configure_app() -> None:

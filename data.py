@@ -115,3 +115,42 @@ def classified_branches(conn, values: dict, *, now: Optional[datetime] = None,
 
 def ignored_count(conn) -> int:
     return db.one(conn, "SELECT COUNT(*) AS n FROM ignored_branches")["n"]
+
+
+def my_work(conn, login: str, values: dict, now: Optional[datetime] = None) -> dict:
+    """Everything waiting on one person: reviews asked of them, their own open
+    PRs, their branches to tidy, and what they've snoozed."""
+    now = now or datetime.now(timezone.utc)
+    login = login.lower()
+    prs = open_prs(conn, now=now)
+    snoozes = {r["pr_id"]: r for r in db.rows(conn, "SELECT * FROM snoozes WHERE until > %s", (now,))}
+
+    to_review = []
+    for p in prs:
+        if p["draft"] or (p.get("author") or "") == login or login not in p["requested_users"]:
+            continue
+        asked = analysis.parse_time(p.get("review_requested_at")) or p["since"]
+        p["asked"] = asked
+        p["asked_ago"] = analysis.ago(asked, now)
+        p["mine_reviewed"] = any(r["login"] == login for r in p.get("reviews") or [])
+        to_review.append(p)
+    to_review.sort(key=lambda p: p["asked"])
+
+    mine = []
+    for p in prs:
+        if (p.get("author") or "") != login:
+            continue
+        p["next_step"] = analysis.author_next_step(p)
+        p["marks"] = reviewer_marks(p)
+        mine.append(p)
+    mine.sort(key=lambda p: (p["next_step"] is None, -p["waiting_seconds"]))
+
+    branches = [b for b in classified_branches(conn, values, now=now)
+                if (b.get("last_committer") or "").lower() == login
+                and b["status"] in ("stale", "left_merged", "left_closed", "pushed_after_merge")]
+    snoozed = [p for p in to_review + mine if p["id"] in snoozes]
+    for p in snoozed:
+        p["snooze"] = snoozes[p["id"]]
+    return {"to_review": to_review, "mine": mine, "branches": branches, "snoozed": snoozed,
+            "needs_action": sum(1 for p in mine if p["next_step"]),
+            "oldest_review": to_review[0]["asked_ago"] if to_review else None}

@@ -55,10 +55,10 @@
       {% for p in people %}
         {% set you = current_user and p.id == current_user.id %}
         <tr>
-          <td><div class="person"><span class="avatar" aria-hidden="true">{{ p.name[:1]|upper }}</span><div><strong>{{ p.name }}</strong><small>{% if p.github_login %}GitHub · {{ p.github_login }}{% else %}{{ p.email }}{% endif %}</small></div></div></td>
+          <td><div class="person"><span class="avatar" aria-hidden="true">{{ p.name[:1]|upper }}</span><div><strong>{{ p.name }}</strong><small>{% if p.via_github %}Signs in with GitHub · {{ p.github_login }}{% else %}{{ p.email }}{% if p.github_login %} · GitHub {{ p.github_login }}{% endif %}{% endif %}</small></div></div></td>
           <td>
-            {% if you or p.github_login %}
-              <span class="badge role-{{ p.role }}">{{ p.role|capitalize }}</span>{% if p.github_login %} <span class="hint">from GitHub teams</span>{% endif %}
+            {% if you or p.via_github %}
+              <span class="badge role-{{ p.role }}">{{ p.role|capitalize }}</span>{% if p.via_github %} <span class="hint">from GitHub teams</span>{% endif %}
             {% else %}
             <form method="post" action="{{ url_for('admin.user_role', user_id=p.id) }}">
               <input type="hidden" name="csrf" value="{{ csrf_token() }}">
@@ -73,7 +73,7 @@
           <td class="sub {{ 'tone-warn' if not p.active }}">{{ p.last }}</td>
           <td style="text-align: right; white-space: nowrap">
             {% if you %}<span class="hint">You</span>{% else %}
-            {% if not p.github_login %}
+            {% if not p.via_github %}
             <form method="post" action="{{ url_for('admin.user_link', user_id=p.id) }}">
               <input type="hidden" name="csrf" value="{{ csrf_token() }}">
               <button type="submit" class="btn small">{{ 'Reset password' if p.active else 'New setup link' }}</button>

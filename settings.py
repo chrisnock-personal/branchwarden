@@ -382,12 +382,21 @@ def user_count(conn) -> int:
 
 def users(conn) -> list[dict]:
     return db.rows(conn, """SELECT id, email, name, role, last_login, setup_expires, github_login,
+                                   github_id IS NOT NULL AS via_github,
                                    (password_hash IS NOT NULL OR github_id IS NOT NULL) AS active
                               FROM users ORDER BY role, name""")
 
 
 def user(conn, user_id: int) -> Optional[dict]:
-    return db.one(conn, "SELECT id, email, name, role, github_login FROM users WHERE id = %s", (user_id,))
+    return db.one(conn, """SELECT id, email, name, role, github_login, github_id IS NOT NULL AS via_github
+                             FROM users WHERE id = %s""", (user_id,))
+
+
+def set_my_login(conn, user_id: int, login: str) -> None:
+    """A local account says which GitHub login is theirs (for My work). Accounts
+    that sign in with GitHub already have theirs."""
+    db.execute(conn, "UPDATE users SET github_login = %s WHERE id = %s AND github_id IS NULL",
+               (login.strip().lstrip("@").lower() or None, user_id))
 
 
 def admin_count(conn) -> int:

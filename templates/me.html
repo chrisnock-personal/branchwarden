@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}My work · Branchwarden{% endblock %}
+{% block head %}<meta http-equiv="refresh" content="120">{% endblock %}
+{% block body %}
+<main>
+  <div class="page-head">
+    <div>
+      <h1>My work</h1>
+      <p>{% if login %}What's waiting on <b class="mono">{{ login }}</b> across every repo Branchwarden watches{% else %}Tell Branchwarden which GitHub login is yours{% endif %}</p>
+    </div>
+    {% if login and not via_github %}
+    <form method="post" action="{{ url_for('my_login') }}" class="filters">
+      {{ csrf() }}<label for="gl" class="sr-only">Your GitHub login</label>
+      <input class="input mono" id="gl" name="login" value="{{ login }}" style="width: 180px; min-height: 36px">
+      <button class="btn small" type="submit">Change</button>
+    </form>
+    {% endif %}
+  </div>
+  {{ flashes() }}
+
+  {% if not login %}
+  <form class="card pad" method="post" action="{{ url_for('my_login') }}" style="max-width: 560px">
+    {{ csrf() }}
+    <h2>Which GitHub login is yours?</h2>
+    <p class="hint">My work lists the reviews asked of you, your open pull requests and your branches. People who sign in with GitHub get this automatically.</p>
+    <div class="field"><label for="gl2">GitHub login</label><input class="input mono" id="gl2" name="login" placeholder="octocat" required autofocus></div>
+    <div class="actions"><span></span><button class="btn primary" type="submit">Show my work</button></div>
+  </form>
+  {% else %}
+
+  <section class="kpis" aria-label="Summary">
+    <div class="card kpi"><div class="label">Waiting on your review</div><div class="row"><span class="value {{ 'tone-warn' if w.to_review }}">{{ w.to_review|length }}</span>{% if w.oldest_review %}<span class="note">oldest {{ w.oldest_review }}</span>{% endif %}</div></div>
+    <div class="card kpi"><div class="label">Your open pull requests</div><div class="row"><span class="value">{{ w.mine|length }}</span><span class="note">{{ w.needs_action }} need{{ 's' if w.needs_action == 1 }} you</span></div></div>
+    <div class="card kpi"><div class="label">Your branches to tidy</div><div class="row"><span class="value {{ 'tone-warn' if w.branches }}">{{ w.branches|length }}</span><span class="note">stale, or left after a PR</span></div></div>
+    <div class="card kpi"><div class="label">Snoozed</div><div class="row"><span class="value">{{ w.snoozed|length }}</span><span class="note">reminders put off</span></div></div>
+  </section>
+
+  <section class="card panel" aria-labelledby="rev-h">
+    <div class="panel-head"><h2 id="rev-h">Waiting on your review</h2><span class="hint">oldest request first</span></div>
+    {% if w.to_review %}
+    <div class="scroll"><table style="min-width: 680px">
+      <thead><tr><th>Pull request</th><th>Author</th><th>State</th><th>Asked</th><th><span class="sr-only">Action</span></th></tr></thead>
+      <tbody>{% for p in w.to_review %}<tr>
+        <td><a class="pr-title" href="{{ p.url }}" target="_blank" rel="noopener">{{ p.title }}</a><div class="pr-sub">{{ p.ref }} · +{{ p.additions }} −{{ p.deletions }}</div></td>
+        <td class="nowrap sub">{{ p.author or '—' }}</td>
+        <td class="nowrap"><span class="badge {{ p.tone }}">{{ p.state_label }}</span>{% if p.mine_reviewed %}<div class="pr-sub">you've reviewed before</div>{% endif %}</td>
+        <td class="nowrap sub">{{ p.asked_ago }} ago</td>
+        <td class="nowrap"><a class="btn small primary" href="{{ p.url }}/files" target="_blank" rel="noopener">Review on GitHub</a></td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    {% else %}<div class="empty">Nothing waiting on your review.</div>{% endif %}
+  </section>
+
+  <section class="card panel" aria-labelledby="mine-h">
+    <div class="panel-head"><h2 id="mine-h">Your pull requests</h2><span class="hint">the ones that need you first</span></div>
+    {% if w.mine %}
+    <div class="scroll"><table style="min-width: 760px">
+      <thead><tr><th>Pull request</th><th>State</th><th>Checks</th><th>Reviewers</th><th>Next</th><th>Waiting</th></tr></thead>
+      <tbody>{% for p in w.mine %}<tr>
+        <td><a class="pr-title" href="{{ p.url }}" target="_blank" rel="noopener">{{ p.title }}</a><div class="pr-sub">{{ p.ref }} · {{ p.head_ref }}</div></td>
+        <td class="nowrap"><span class="badge {{ p.tone }}">{{ p.state_label }}</span></td>
+        <td class="nowrap"><span class="tone-{{ p.ci_tone }} dot" style="font-size: 13px; font-weight: 600">{{ p.ci_label }}</span></td>
+        <td>{% include "_marks.html" %}</td>
+        <td>{% if p.next_step %}<b style="font-weight: 600">{{ p.next_step }}</b>{% else %}<span class="sub">Waiting on {{ p.waiting_on }}</span>{% endif %}</td>
+        <td class="nowrap sub">{{ p.waiting }}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    {% else %}<div class="empty">No open pull requests of yours.</div>{% endif %}
+  </section>
+
+  <div class="health">
+    <section class="card panel" aria-labelledby="br-h">
+      <div class="panel-head"><h2 id="br-h">Your branches to tidy</h2><a href="{{ url_for('branches', q=login) }}" style="font-size: 13px">All branches</a></div>
+      {% for b in w.branches %}
+        <div class="channel">
+          <div><strong class="br">{{ b.name }}</strong><span class="detail">{{ b.repo_name }} · {% if b.status == 'stale' %}last commit {{ b.age }} ago{% else %}#{{ b.pr_number }} {{ 'merged' if b.pr_state == 'MERGED' else 'closed' }}{% endif %}</span></div>
+          <div class="acts" style="flex-direction: row; align-items: center"><span class="badge {{ b.tone }}">{{ b.status_label }}</span>{% if b.url %}<a class="btn small" href="{{ b.url }}" target="_blank" rel="noopener">Open</a>{% endif %}</div>
+        </div>
+      {% else %}<div class="empty">Nothing to tidy.</div>{% endfor %}
+    </section>
+    <section class="card panel" aria-labelledby="sn-h">
+      <div class="panel-head"><h2 id="sn-h">Snoozed reminders</h2></div>
+      {% for p in w.snoozed %}
+        <div class="channel">
+          <div><strong>{{ p.title }}</strong><span class="detail">{{ p.ref }} · until {{ p.snooze.until.strftime('%a %d %b %H:%M') }} UTC, by {{ p.snooze.by_name }}</span></div>
+          <a class="btn small" href="{{ url_for('pulls', assign=p.id) }}#snooze">Change</a>
+        </div>
+      {% else %}<div class="empty">Nothing snoozed.</div>{% endfor %}
+    </section>
+  </div>
+  {% if not via_github %}<p class="hint">Following the GitHub login <span class="mono">{{ login }}</span>, which you set yourself.</p>{% endif %}
+  {% endif %}
+</main>
+{% endblock %}

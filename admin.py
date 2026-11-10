@@ -199,7 +199,8 @@ def github_callback():
     with db.get_conn() as conn:
         user_id = settings.github_user(conn, who, role, ghlogin.noreply_email(who["id"], who["login"]))
     _sign_in(user_id)
-    return redirect(pending.get("next") or "/")
+    nxt = pending.get("next") or "/"
+    return redirect(url_for("my_work") if nxt == "/" else nxt)
 
 
 @bp.post("/logout")
@@ -934,7 +935,7 @@ def user_role(user_id: int):
         return users(error="You can't change your own role. Ask another admin.")
     with db.get_conn() as conn:
         target = settings.user(conn, user_id)
-        if target and target["github_login"]:
+        if target and target["via_github"]:
             return users(error=f"{target['name']}'s role comes from their GitHub teams: change the role lists instead.")
         problem = settings.set_role(conn, user_id, request.form.get("role", ""), _actor())
     if problem:
@@ -949,7 +950,7 @@ def user_link(user_id: int):
         person = settings.user(conn, user_id)
         if not person:
             abort(404)
-        if person["github_login"]:
+        if person["via_github"]:
             return users(error=f"{person['name']} signs in with GitHub, so has no password to set.")
         new = settings.new_setup_link(conn, user_id, _actor())
     return users(new_link={"name": person["name"], "role": person["role"], "url": _link(new.token)})

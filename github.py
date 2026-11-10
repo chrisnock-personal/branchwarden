@@ -25,7 +25,9 @@ import requests
 log = logging.getLogger("branchwarden.github")
 
 TIMEOUT = 30
-USER_AGENT = "Branchwarden"
+from version import VERSION
+
+USER_AGENT = f"Branchwarden/{VERSION}"
 
 
 class GitHubError(Exception):

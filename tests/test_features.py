@@ -95,3 +95,21 @@ def test_scanner_first_review_skips_the_author():
         {"submittedAt": "2026-11-01T09:00:00Z", "author": {"login": "dana"}},
         {"submittedAt": "2026-11-02T09:00:00Z", "author": {"login": "sasha"}}]}}
     assert scanner.first_review(node) == "2026-11-02T09:00:00Z"
+
+
+def test_author_next_step_most_urgent_first():
+    base = {"draft": False, "mergeable": "MERGEABLE", "ci_state": "SUCCESS", "review_decision": None,
+            "requested": [{"user": "morgan"}], "reviews": []}
+    assert analysis.author_next_step({**base, "draft": True, "mergeable": "CONFLICTING"}).startswith("Finish")
+    assert analysis.author_next_step({**base, "mergeable": "CONFLICTING", "ci_state": "FAILURE"}).startswith("Resolve")
+    assert analysis.author_next_step({**base, "ci_state": "FAILURE", "review_decision": "APPROVED"}).startswith("Fix")
+    assert analysis.author_next_step({**base, "review_decision": "CHANGES_REQUESTED"}).startswith("Make")
+    assert analysis.author_next_step({**base, "review_decision": "APPROVED"}).startswith("Merge")
+    assert analysis.author_next_step({**base, "requested": []}).startswith("Ask")
+    assert analysis.author_next_step(base) is None        # waiting on reviewers
+
+
+def test_version_is_semver():
+    import re
+    from version import VERSION
+    assert re.fullmatch(r"\d+\.\d+\.\d+", VERSION)
