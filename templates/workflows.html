@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Workflows · Branchwarden{% endblock %}
+{% macro dt(t) %}{% set l = local(t) %}{{ l.strftime('%a %d %b %H:%M') if l else '—' }}{% endmacro %}
+{% macro state_badge(r) %}
+  {% if r.state == 'disabled_inactivity' %}<span class="badge warn" title="GitHub switches off scheduled workflows after 60 days with no activity in the repo">Switched off by GitHub</span>
+  {% elif r.state != 'active' %}<span class="badge muted">Switched off</span>{% endif %}
+{% endmacro %}
+{% block body %}
+<main>
+  <div class="page-head">
+    <div>
+      <h1>Workflows</h1>
+      <p>Every GitHub Actions workflow{% if repo %} in {{ repo }}{% endif %}: when it was due, whether it ran, and how it ended. Days and times in {{ w.tz }}.</p>
+    </div>
+    <div class="filters">
+      <div class="seg" role="group" aria-label="Period">
+        {% for d, label in periods %}<a class="{{ 'on' if days == d }}" href="{{ link(days=d) }}" {% if days == d %}aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}
+      </div>
+      <div class="seg" role="group" aria-label="Show">
+        {% for s, label in shows %}<a class="{{ 'on' if show == s }}" href="{{ link(show=None if s == 'all' else s) }}" {% if show == s %}aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}
+      </div>
+      <form method="get" action="{{ url_for('workflows_page') }}">
+        <input type="hidden" name="days" value="{{ days }}">
+        {% if show != 'all' %}<input type="hidden" name="show" value="{{ show }}">{% endif %}
+        <label for="repo" class="sr-only">Repository</label>
+        <select id="repo" name="repo" data-autosubmit>
+          <option value="">All repositories</option>
+          {% for r in repos %}<option value="{{ r.full_name }}" {{ 'selected' if repo == r.full_name }}>{{ r.name }}</option>{% endfor %}
+        </select>
+        <noscript><button class="btn small" type="submit">Apply</button></noscript>
+      </form>
+    </div>
+  </div>
+
+  {% if w.no_access %}
+  <div class="card pad wf-notice" role="status">
+    <strong>Workflows can't be read in {{ w.no_access|length }} repositor{{ 'y' if w.no_access|length == 1 else 'ies' }}</strong>
+    <p class="hint">{% for r in w.no_access[:6] %}{{ r.name }}: {{ r.workflows_error }}{{ '; ' if not loop.last }}{% endfor %}{% if w.no_access|length > 6 %} and {{ w.no_access|length - 6 }} more{% endif %}.
+      Give the token or the GitHub App the <b>Actions: read</b> permission{% if current_user.role == 'admin' %} (<a href="{{ url_for('admin.github') }}">Settings › GitHub</a>){% endif %}; the next scan picks them up.</p>
+  </div>
+  {% endif %}
+
+  <section class="kpis" aria-label="Summary">
+    {% for t in w.tiles %}
+    <div class="card kpi"><div class="label">{{ t.label }}</div><div class="row"><span class="value {{ t.tone }}">{{ t.value }}</span></div><span class="note">{{ t.note }}</span></div>
+    {% endfor %}
+  </section>
+
+  {% if w.attention and show != 'problems' %}
+  <section class="card panel" aria-labelledby="att-h">
+    <div class="panel-head"><h2 id="att-h">Needs attention</h2><span class="hint">{{ w.attention|length }} workflow{{ 's' if w.attention|length != 1 }}</span></div>
+    <ul class="wf-attn">
+      {% for r in w.attention[:8] %}
+      <li>
+        <a class="pr-title" href="#wf-{{ r.id }}">{{ r.repo }} · {{ r.name }}</a>
+        <span class="wf-why">
+          {% if r.failing_since %}<span class="badge bad">{% if r.failing_before %}Failing for {{ r.failing_since|ago }} or more{% else %}Failing since {{ r.failing_since|ago }} ago{% endif %}</span>{% endif %}
+          {% if r.missed %}<span class="badge warn">{{ r.missed|length }} scheduled run{{ 's' if r.missed|length != 1 }} missed</span>{% endif %}
+          {{ state_badge(r) }}
+          {% if r.last and r.last_outcome == 'failed' and r.last.url %}<a class="hint" href="{{ r.last.url }}" rel="noopener">last run</a>{% endif %}
+        </span>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  <div class="wf-legend" aria-hidden="true">
+    {% for s in ('passed', 'failed', 'missed', 'cancelled', 'running', 'due') %}<span><i class="st-{{ s }}"></i>{{ outcomes[s][0] }}</span>{% endfor %}
+    <span class="hint">Each square is a day. Scheduled workflows due up to four times a day show one bar per due time; others show their runs, sized by count.</span>
+  </div>
+
+  {% for g in w.groups %}
+  <section class="card panel" aria-labelledby="repo-{{ g.repo_id }}">
+    <div class="panel-head">
+      <h2 id="repo-{{ g.repo_id }}">{% if g.repo_url %}<a class="pr-title" href="{{ g.repo_url }}/actions" rel="noopener">{{ g.repo }}</a>{% else %}{{ g.repo }}{% endif %}</h2>
+      <span class="hint">{{ g.rows|length }} workflow{{ 's' if g.rows|length != 1 }}{% if g.problems %} · <span class="tone-warn">{{ g.problems }} need{{ 's' if g.problems == 1 }} attention</span>{% endif %}</span>
+    </div>
+    <div class="wf-axis" style="--days: {{ w.days|length }}" aria-hidden="true">
+      <span></span>
+      <span class="wf-axis-days"><span>{{ w.days[0].strftime('%d %b') }}</span><span>{{ w.days[w.days|length // 2].strftime('%d %b') }}</span><span>Today</span></span>
+      <span></span>
+    </div>
+    {% for r in g.rows %}
+    <details class="wf" id="wf-{{ r.id }}" {{ 'open' if request.args.get('open') == r.id|string }}>
+      <summary class="wf-row" style="--days: {{ w.days|length }}">
+        <span class="wf-name">
+          <strong>{{ r.name }}</strong>
+          <span class="wf-meta mono">{{ r.path }}</span>
+          <span class="wf-tags">
+            {% for t in r.triggers[:4] %}<span class="badge {{ 'info' if t == 'schedule' else 'muted' }}">{{ t }}</span>{% endfor %}
+            {% if r.triggers|length > 4 %}<span class="badge muted">+{{ r.triggers|length - 4 }}</span>{% endif %}
+            {{ state_badge(r) }}
+          </span>
+        </span>
+        <span class="wf-strip" role="img" aria-label="{{ r.name }}, last {{ days }} days: {{ r.runs }} runs, {{ r.finished - r.passed }} failed{% if r.slots %}, {{ r.missed|length }} of {{ r.slots }} scheduled runs missed{% endif %}">
+          {% for c in r.cells %}<span class="wf-cell{{ ' none' if not c.segments }}" title="{{ c.label }}">{% for s in c.segments %}<i class="st-{{ s.state }}" style="flex-grow: {{ s.grow }}"></i>{% endfor %}</span>{% endfor %}
+        </span>
+        <span class="wf-stats">
+          {% if r.pass_rate is not none %}<b class="{{ 'tone-good' if r.pass_rate >= 90 else 'tone-warn' if r.pass_rate >= 60 else 'tone-bad' }}">{{ r.pass_rate }}%</b> passed{% else %}<span class="tone-muted">no finished runs</span>{% endif %}
+          <span>{% if r.last %}last {{ r.last.created_at|ago }} ago{% else %}never run{% endif %}</span>
+        </span>
+      </summary>
+      <div class="wf-body">
+        {% if r.crons %}
+        <p class="hint">Schedule:
+          {% for c in r.crons %}<code class="mono">{{ c.text }}</code> ({{ c.words }}){{ '; ' if not loop.last }}{% endfor %}
+          {% if r.next_due %} · next due {{ dt(r.next_due) }}{% endif %}
+          {% if r.usual_delay %} · GitHub usually starts it {{ r.usual_delay }} late{% endif %}
+          {% if r.missed %} · <span class="tone-warn">missed {{ r.missed|length }} in {{ days }} days{% if r.missed|length > 5 %}, latest{% endif %}: {% for t in r.missed[-5:] %}{{ dt(t) }}{{ ', ' if not loop.last }}{% endfor %}</span>{% endif %}</p>
+        {% endif %}
+        {% if r.state == 'disabled_inactivity' %}<p class="hint warn">GitHub switched this off because the repository had no activity for 60 days. Enable it again under Actions on GitHub.</p>{% endif %}
+        {% if r.file_error %}<p class="hint warn">Couldn't read the workflow file: {{ r.file_error }}.</p>{% endif %}
+        {% if r.recent %}
+        <div class="scroll"><table style="min-width: 640px">
+          <thead><tr><th>Started</th><th>Trigger</th><th>Branch</th><th>Result</th><th>Took</th><th>By</th><th><span class="sr-only">Link</span></th></tr></thead>
+          <tbody>{% for x in r.recent %}<tr>
+            <td class="sub nowrap">{{ dt(x.created_at) }}</td>
+            <td class="sub">{{ x.event }}</td>
+            <td class="mono" style="font-size: 12px">{{ x.head_branch or '' }}</td>
+            <td><span class="badge {{ outcomes[x.outcome][1] }}">{{ outcomes[x.outcome][0] }}</span>{% if x.run_attempt > 1 %} <span class="hint">attempt {{ x.run_attempt }}</span>{% endif %}</td>
+            <td class="sub nowrap">{{ x.took }}</td>
+            <td class="sub">{{ x.actor or '' }}</td>
+            <td>{% if x.url %}<a href="{{ x.url }}" rel="noopener">#{{ x.run_number }}</a>{% endif %}</td>
+          </tr>{% endfor %}</tbody>
+        </table></div>
+        {% else %}<div class="empty">No runs in the last {{ days }} days.</div>{% endif %}
+        {% if r.url %}<p class="hint"><a href="{{ r.url }}" rel="noopener">All runs on GitHub</a></p>{% endif %}
+      </div>
+    </details>
+    {% endfor %}
+  </section>
+  {% else %}
+  <div class="card"><div class="empty">
+    {% if show != 'all' %}Nothing to show with this filter.
+    {% elif w.unscanned %}Workflows are read on the next scan.
+    {% else %}No workflows found{% if repo %} in {{ repo }}{% endif %}.{% endif %}
+  </div></div>
+  {% endfor %}
+
+  {% if current_user.role == 'admin' %}
+  <p class="hint">Messages: “Workflow failing or fixed” is {{ 'on' if rule_on.get('wf_failed') else 'off' }}, “Scheduled run missed or workflow switched off” is {{ 'on' if rule_on.get('wf_schedule') else 'off' }}: <a href="{{ url_for('admin.notifications', open='wf_failed') }}#rule-wf_failed">change them</a>.</p>
+  {% endif %}
+</main>
+{% endblock %}

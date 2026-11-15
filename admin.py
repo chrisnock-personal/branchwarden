@@ -528,7 +528,8 @@ def notifications():
         rule_list.append({**r, "desc": rules.describe(r, names),
                           "to": rules.target_label(str(r["params"].get("target", "routed")), names)})
     return render_template("settings_notifications.html", channels=chans, rules=rule_list, open_id=open_id,
-                           get=lambda k: settings.get(values, k), units=rules.UNITS, days=analysis.DAYS)
+                           get=lambda k: settings.get(values, k), units=rules.UNITS, days=analysis.DAYS,
+                           wf_scopes=rules.WF_SCOPES)
 
 
 SLACK_CHANNEL_ID = re.compile(r"^[CG][A-Z0-9]{6,}$")
@@ -733,6 +734,10 @@ def rule_save(key: str):
                      pool=settings.join_list(e.lower().lstrip("@") for e in settings.split_list(form.get("pool", ""))),
                      repos=settings.join_list(settings.split_list(form.get("repos", ""))),
                      skip_label=form.get("skip_label", "").strip())
+        elif key == "wf_failed":
+            if form.get("scope") in dict(rules.WF_SCOPES):
+                p["scope"] = form["scope"]
+            p["fixed"] = bool(form.get("fixed"))
         elif rule.kind in ("digest", "post"):
             if form.get("day") not in analysis.DAYS or not HHMM.match(form.get("time", "")):
                 flash("Pick a day and a time (HH:MM).", "bad")

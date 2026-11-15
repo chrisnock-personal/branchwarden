@@ -38,6 +38,7 @@
     <a href="{{ url_for('index') }}" {% if ep == 'index' %}class="current" aria-current="page"{% endif %}>Overview</a>
     <a href="{{ url_for('pulls') }}" {% if ep == 'pulls' %}class="current" aria-current="page"{% endif %}>Pull requests</a>
     <a href="{{ url_for('branches') }}" {% if ep == 'branches' %}class="current" aria-current="page"{% endif %}>Branches</a>
+    <a href="{{ url_for('workflows_page') }}" {% if ep == 'workflows_page' %}class="current" aria-current="page"{% endif %}>Workflows</a>
     <a href="{{ url_for('metrics_page') }}" {% if ep == 'metrics_page' %}class="current" aria-current="page"{% endif %}>Metrics</a>
     <a href="{{ url_for('mvp_page') }}" {% if ep == 'mvp_page' %}class="current" aria-current="page"{% endif %}>MVP</a>
     {% if current_user and current_user.role == 'admin' %}

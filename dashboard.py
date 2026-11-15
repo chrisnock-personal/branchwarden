@@ -40,6 +40,7 @@ import notify  # noqa: E402
 import rules  # noqa: E402
 from version import VERSION  # noqa: E402
 import settings  # noqa: E402
+import workflows  # noqa: E402
 from admin import bp as admin_bp  # noqa: E402
 from github import Connections, GitHubError, verify_signature  # noqa: E402
 
@@ -81,7 +82,7 @@ app.register_blueprint(admin_bp)
 
 ORG_CACHE_SECONDS = 3600
 WEBHOOK_EVENTS = {"pull_request", "pull_request_review", "pull_request_review_comment", "check_suite",
-                  "check_run", "status", "push", "create", "delete", "repository"}
+                  "check_run", "status", "push", "create", "delete", "repository", "workflow_run"}
 
 
 def can_act() -> bool:
@@ -479,6 +480,35 @@ def metrics_page():
         m = metrics.compute(conn, days, repo)
         repos = db.rows(conn, "SELECT full_name, name FROM repos WHERE included ORDER BY name")
     return render_template("metrics.html", m=m, periods=metrics.PERIODS, days=days, repo=repo, repos=repos)
+
+
+# ─── Workflows ──────────────────────────────────────────────────────────────
+
+WF_SHOW = (("all", "All"), ("problems", "Needs attention"), ("scheduled", "Scheduled"))
+
+
+@app.get("/workflows")
+def workflows_page():
+    days = request.args.get("days", type=int)
+    days = days if days in dict(workflows.PERIODS) else 14
+    repo = request.args.get("repo", "")
+    show = request.args.get("show", "all")
+    show = show if show in dict(WF_SHOW) else "all"
+    with db.get_conn() as conn:
+        values = settings.load(conn)
+        w = workflows.load(conn, values, days, repo)
+        repos = db.rows(conn, """SELECT DISTINCT r.full_name, r.name FROM repos r JOIN workflows w ON w.repo_id = r.id
+                                  WHERE r.included ORDER BY r.name""")
+        rule_on = {k: v["enabled"] for k, v in rules.load(conn).items() if k.startswith("wf_")}
+    if show != "all":
+        keep = (lambda r: r["problems"]) if show == "problems" else (lambda r: r["crons"])
+        for grp in w["groups"]:
+            grp["rows"] = [r for r in grp["rows"] if keep(r)]
+        w["groups"] = [grp for grp in w["groups"] if grp["rows"]]
+    tz = rules.work_hours(values).tz
+    return render_template("workflows.html", w=w, periods=workflows.PERIODS, days=days, repo=repo, repos=repos,
+                           show=show, shows=WF_SHOW, outcomes=workflows.OUTCOMES, rule_on=rule_on,
+                           local=lambda t: t.astimezone(tz) if t else None)
 
 
 # ─── My work ────────────────────────────────────────────────────────────────

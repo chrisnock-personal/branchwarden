@@ -112,14 +112,15 @@ class Client:
             raise GitHubError(_error_text(resp), resp.status_code)
         return resp
 
-    def paged(self, path: str, limit: int = 1000) -> list:
-        """Every item of a paginated REST list (up to limit)."""
+    def paged(self, path: str, limit: int = 1000, key: str = "installations") -> list:
+        """Every item of a paginated REST list (up to limit). Lists wrapped in an
+        object (installations, workflows, workflow_runs) are read from `key`."""
         out: list = []
         url = f"{self.api_url}{path}{'&' if '?' in path else '?'}per_page=100"
         while url and len(out) < limit:
             resp = self.rest("GET", url)
             data = resp.json()
-            out.extend(data if isinstance(data, list) else data.get("installations", []))
+            out.extend(data if isinstance(data, list) else data.get(key, []))
             url = resp.links.get("next", {}).get("url")
         return out
 

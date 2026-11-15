@@ -4,6 +4,32 @@ All notable changes to Branchwarden. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-11-15
+
+### Added
+
+- **Workflows page:** every GitHub Actions workflow per repo, as a strip of
+  days (7, 14 or 30): each scheduled workflow's due times from its cron
+  schedule, matched to the runs that answered them (passed, failed,
+  cancelled, still running, or missed), and other workflows' runs per day.
+  GitHub often starts scheduled runs late, hours late for quiet repos, so a
+  due time counts as missed only after 1.5 times that workflow's usual delay
+  plus an hour (at least 90 minutes, at most 16 hours). Tiles for failing, missed and
+  switched-off workflows, a "Needs attention" list, and each workflow's recent
+  runs with trigger, branch, result, duration and who started it.
+- **Teams and Slack:** two new rules. "Workflow failing or fixed" posts when a
+  workflow goes from passing to failing (and back) on scheduled runs, the
+  default branch, or every branch. "Scheduled run missed or workflow switched
+  off" posts when a schedule didn't run, or when GitHub switched a scheduled
+  workflow off for inactivity.
+- The GitHub App's *Workflow run* webhook triggers a rescan.
+
+### Changed
+
+- The token and the GitHub App need **Actions: read** for workflows. Without
+  it, everything else works as before.
+- New dependency: PyYAML, to read workflow files.
+
 ## [0.1.0] - 2026-11-10
 
 The first release.

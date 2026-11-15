@@ -5,7 +5,7 @@ Keeping the database small, and a daily snapshot for the trend charts.
 
 - Closed and merged PRs are kept for RETAIN_PR_DAYS (365 by default): the
   metrics need them. Their reminders, assignments and threads go with them.
-- Sent and failed messages, scans and snoozes that have run out are kept for
+- Sent and failed messages, workflow runs, scans and snoozes that have run out are kept for
   RETAIN_LOG_DAYS (90 by default).
 - Webhook events are kept for 14 days (dashboard.py prunes those as they come in).
 """
@@ -32,6 +32,8 @@ def prune(conn, values: dict) -> dict:
                                     (pr_days,)),
         "messages": db.execute(conn, """DELETE FROM notifications WHERE status <> 'pending'
                                          AND created_at < NOW() - %s * INTERVAL '1 day'""", (log_days,)),
+        "workflow runs": db.execute(conn, "DELETE FROM workflow_runs WHERE created_at < NOW() - %s * INTERVAL '1 day'",
+                                    (max(35, log_days),)),
         "scans": db.execute(conn, "DELETE FROM scan_log WHERE started_at < NOW() - %s * INTERVAL '1 day'", (log_days,)),
         "assignments": db.execute(conn, "DELETE FROM assignments WHERE assigned_at < NOW() - %s * INTERVAL '1 day'",
                                   (pr_days,)),

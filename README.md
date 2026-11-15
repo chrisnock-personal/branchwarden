@@ -19,6 +19,11 @@ organisation or account:
   your open PRs and what each needs next, your branches to tidy, and your
   snoozed reminders. People who sign in with GitHub land on it. Local accounts
   can give their GitHub login on the page itself.
+- **Workflows:** every GitHub Actions workflow, day by day over the last 7, 14
+  or 30 days: when each scheduled workflow was due (from its cron), whether it
+  ran, and whether its runs passed or failed. It flags workflows failing on the
+  default branch, scheduled runs that never started, and scheduled workflows
+  GitHub has switched off after 60 days without activity in the repo.
 - **Metrics:** time to first review, time to merge, merges per week, and daily
   trends of PRs needing review and stale branches, per repo or overall.
 - **MVP:** for the last 7 days (or the 7 before), who submitted the most
@@ -26,7 +31,8 @@ organisation or account:
   PRs, with team totals. An optional weekly post sends the MVPs to Teams and Slack.
 - **Notifications:** posted to Microsoft Teams (Workflows webhooks, Adaptive Cards) and
   Slack (incoming webhooks, Block Kit) when PRs open, are reviewed, merge or
-  close. Reminders go out in working hours, plus a weekly digest of branches to tidy up.
+  close, and when a workflow starts failing (or passes again), misses a
+  scheduled run, or is switched off. Reminders go out in working hours, plus a weekly digest of branches to tidy up.
 
 Branchwarden only reads branches. It never pushes and never deletes. Its one
 write to GitHub is requesting (or withdrawing) reviewers.
@@ -98,6 +104,8 @@ installed and otherwise the token (or only one, set per account).
 - Contents: read.
 - Metadata: read.
 - Members: read, for organisations, so the reviewer picker can list people and teams.
+- Actions: read, for the Workflows page. Without it, PRs and branches are
+  still scanned and the Workflows page lists the repos it can't read.
 
 Branchwarden reads the token's expiry from GitHub and shows a warning 14 days before.
 
@@ -110,7 +118,8 @@ and acts as itself.
    - Metadata: read
    - Checks: read
    - Members: read
-2. Subscribe it to these events: *Pull request*, *Pull request review*, *Check suite*, *Push*, *Create*, *Delete*.
+   - Actions: read
+2. Subscribe it to these events: *Pull request*, *Pull request review*, *Check suite*, *Push*, *Create*, *Delete*, *Workflow run*.
 3. Set its webhook URL to `https://<branchwarden>/github/webhook`, with a random secret.
 4. Generate a private key, then install the App on the organisation.
 5. Paste the App ID, the key and the webhook secret into Settings › GitHub.

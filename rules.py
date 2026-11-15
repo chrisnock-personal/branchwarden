@@ -44,6 +44,10 @@ RULES = (
     Rule("opened", "event", "PR opened or ready for review", {"target": "routed", "mention": True}),
     Rule("review", "event", "Review submitted", {"target": "routed", "mention": True}),
     Rule("closed", "event", "Merged or closed", {"target": "routed", "mention": False}),
+    Rule("wf_failed", "event", "Workflow failing or fixed",
+         {"target": "routed", "mention": False, "scope": "default", "fixed": True}),
+    Rule("wf_schedule", "event", "Scheduled run missed or workflow switched off",
+         {"target": "routed", "mention": False}),
     Rule("assign", "assign", "Auto-assign reviewers",
          {"after": 1, "unit": "working_hours", "count": 1, "codeowners": True, "pool": "", "repos": "",
           "skip_label": "do-not-review", "target": "routed", "mention": True}, enabled=False),
@@ -62,6 +66,8 @@ RULES = (
 RULE_BY_KEY = {r.key: r for r in RULES}
 
 UNITS = (("working_hours", "working hours"), ("hours", "hours"), ("days", "days"))
+WF_SCOPES = (("scheduled", "scheduled runs"), ("default", "scheduled runs and the default branch"),
+             ("all", "every branch"))
 
 
 def seed(conn) -> None:
@@ -82,6 +88,14 @@ def load(conn) -> dict[str, dict]:
 
 def describe(rule: dict, channel_names: dict[int, str]) -> str:
     p = rule["params"]
+    if rule["key"] == "wf_failed":
+        scope = dict(WF_SCOPES).get(p.get("scope", "default"), "the default branch")
+        return (f"When a workflow starts failing ({scope})"
+                + (", and again when it passes" if p.get("fixed", True) else "")
+                + (", with who started the run @mentioned" if p.get("mention") else ""))
+    if rule["key"] == "wf_schedule":
+        return ("A scheduled workflow didn't start in time (90 minutes, or longer where GitHub usually runs it "
+                "late), or was switched off (GitHub does that after 60 days with no repo activity)")
     if rule["kind"] == "event":
         return {"opened": "Posted straight away"
                           + (", with the requested reviewers @mentioned" if p.get("mention") else ""),
@@ -201,12 +215,111 @@ def event_message(conn, event: dict, pr: dict, params: dict, values: dict) -> Op
     return None
 
 
+# ─── Workflow messages ──────────────────────────────────────────────────────
+
+def _wf_for_event(conn, event: dict) -> Optional[dict]:
+    return db.one(conn, """SELECT w.*, r.full_name, r.name AS repo_name, r.url AS repo_url, r.default_branch
+                             FROM workflows w JOIN repos r ON r.id = w.repo_id WHERE w.id = %s""",
+                  (event["workflow_id"],))
+
+
+def wf_in_scope(scope: str, run: dict, default_branch: Optional[str]) -> bool:
+    if scope == "all":
+        return True
+    if run.get("event") == "schedule":
+        return True
+    return scope == "default" and run.get("head_branch") == default_branch
+
+
+def _local(at: datetime, values: dict) -> str:
+    tz = work_hours(values).tz
+    local = at.astimezone(tz)
+    return local.strftime("%a %d %b %H:%M ") + (local.tzname() or "")
+
+
+def _wait(minutes: int) -> str:
+    if minutes < 120:
+        return f"{minutes} minutes"
+    hours = round(minutes / 60)
+    return f"{hours} hours"
+
+
+def workflow_message(event: dict, wf: dict, run: Optional[dict], params: dict, values: dict) -> Optional[dict]:
+    """The message for a workflow event (wf_failed, wf_fixed, wf_missed, wf_disabled)."""
+    kind = event["kind"]
+    facts = [["Repository", wf["full_name"]], ["Workflow", wf["path"]]]
+    buttons = [["Open in Branchwarden", _link(values, f"/workflows?repo={wf['full_name']}")]]
+    msg = {"title": f"{wf['repo_name']} · {wf['name']}", "title_url": wf.get("url"), "facts": facts}
+    if kind in ("wf_failed", "wf_fixed"):
+        if not run:
+            return None
+        failed = kind == "wf_failed"
+        branch = run.get("head_branch") or "?"
+        facts += [["Trigger", run.get("event") or "?"], ["Branch", branch]]
+        if run.get("head_sha"):
+            facts.append(["Commit", run["head_sha"][:7]])
+        who = run.get("actor")
+        if who and run.get("event") != "schedule":
+            facts.append(["Started by", f"@{{{who}}}" if params.get("mention") else who])
+        number = f"#{run['run_number']}" + (f" (attempt {run['run_attempt']})" if (run.get("run_attempt") or 1) > 1 else "")
+        msg.update(heading=f"Workflow {'failing' if failed else 'passing again'}: {wf['name']}",
+                   tone="bad" if failed else "good",
+                   text=(f"Run {number} failed on `{branch}`." if failed
+                         else f"Run {number} passed on `{branch}` after failing."))
+        msg["buttons"] = [["Open the run", run.get("url")]] + buttons
+        return msg
+    if kind == "wf_missed":
+        times = [datetime.fromisoformat(t) for t in event.get("times") or []]
+        if not times:
+            return None
+        when = ", ".join(_local(t, values) for t in times[:5]) + (f" and {len(times) - 5} more" if len(times) > 5 else "")
+        facts.append(["Schedule", "; ".join(wf.get("crons") or []) + " (UTC)"])
+        msg.update(heading=f"Scheduled run missed: {wf['name']}", tone="warn",
+                   text=(f"Due {when}, and no run had started {_wait(event.get('grace_minutes') or 90)} later. "
+                         "GitHub delays scheduled runs when it's busy and sometimes drops them."))
+        msg["buttons"] = [["Open on GitHub", wf.get("url")]] + buttons
+        return msg
+    if kind == "wf_disabled":
+        why = ("GitHub switched it off because the repository had no activity for 60 days."
+               if event.get("state") == "disabled_inactivity" else "Someone switched it off on GitHub.")
+        msg.update(heading=f"Workflow switched off: {wf['name']}", tone="warn",
+                   text=f"{why} Its schedule ({'; '.join(wf.get('crons') or [])}) won't run until it's enabled "
+                        "again under Actions on GitHub.")
+        msg["buttons"] = [["Open on GitHub", wf.get("url")]] + buttons
+        return msg
+    return None
+
+
+def handle_workflow_event(conn, ev: dict, rules: dict, values: dict) -> int:
+    key = "wf_failed" if ev["kind"] in ("wf_failed", "wf_fixed") else "wf_schedule"
+    rule = rules.get(key)
+    if not rule or not rule["enabled"]:
+        return 0
+    p = rule["params"]
+    if ev["kind"] == "wf_fixed" and not p.get("fixed", True):
+        return 0
+    wf = _wf_for_event(conn, ev)
+    if not wf:
+        return 0
+    run = db.one(conn, "SELECT * FROM workflow_runs WHERE id = %s", (ev["run_id"],)) if ev.get("run_id") else None
+    if run and not wf_in_scope(p.get("scope", "default"), run, wf["default_branch"]):
+        return 0
+    msg = workflow_message(ev, wf, run, p, values)
+    if not msg:
+        return 0
+    chans = notify.channels_for(conn, str(p.get("target", "routed")), wf["full_name"])
+    return notify.enqueue(conn, chans, ev["kind"], msg)
+
+
 def handle_events(conn, events: list[dict], values: dict, now: Optional[datetime] = None) -> int:
     """Queue messages for what the scan saw happen. Returns how many were queued."""
     now = now or datetime.now(timezone.utc)
     rules = load(conn)
     queued = 0
     for ev in events:
+        if ev["kind"].startswith("wf_"):
+            queued += handle_workflow_event(conn, ev, rules, values)
+            continue
         key = {"opened": "opened", "ready": "opened", "review": "review",
                "merged": "closed", "closed": "closed"}.get(ev["kind"])
         rule = rules.get(key)

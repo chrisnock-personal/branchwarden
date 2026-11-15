@@ -23,6 +23,8 @@ snoozes          – reminders someone has put off for a PR
 threads          – the Slack message each PR's thread hangs off, per channel
 daily            – one row a day of headline counts, for the trend charts
 branch_deletions – branches that went, and who deleted them when a webhook said so
+workflows        – each repo's GitHub Actions workflows, with their triggers and cron schedules
+workflow_runs    – their runs, kept for RETAIN_LOG_DAYS
 settings, users, settings_log – see settings.py
 """
 
@@ -176,7 +178,7 @@ CREATE TABLE IF NOT EXISTS people (
 CREATE TABLE IF NOT EXISTS notifications (
     id              SERIAL PRIMARY KEY,
     channel_id      INTEGER NOT NULL REFERENCES channels (id) ON DELETE CASCADE,
-    kind            TEXT NOT NULL,                 -- opened | review | merged | closed | reminder:<rule> | digest | assigned | test
+    kind            TEXT NOT NULL,                 -- opened | review | merged | closed | wf_* | reminder:<rule> | digest | assigned | test
     pr_id           INTEGER REFERENCES pull_requests (id) ON DELETE SET NULL,
     payload         JSONB NOT NULL,                -- the message, rendered per channel at send time
     status          TEXT NOT NULL DEFAULT 'pending', -- pending | sent | failed
@@ -285,6 +287,51 @@ CREATE TABLE IF NOT EXISTS branch_deletions (
     deleted_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_branch_deletions_at ON branch_deletions (deleted_at);
+
+-- GitHub Actions workflows (see workflows.py).
+ALTER TABLE repos ADD COLUMN IF NOT EXISTS workflows_scanned BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE repos ADD COLUMN IF NOT EXISTS workflows_oid TEXT;       -- default branch head when the files were read
+ALTER TABLE repos ADD COLUMN IF NOT EXISTS workflows_error TEXT;
+ALTER TABLE repos ADD COLUMN IF NOT EXISTS workflows_at TIMESTAMPTZ;
+
+CREATE TABLE IF NOT EXISTS workflows (
+    id              BIGINT PRIMARY KEY,            -- GitHub's workflow id
+    repo_id         INTEGER NOT NULL REFERENCES repos (id) ON DELETE CASCADE,
+    name            TEXT NOT NULL,
+    path            TEXT NOT NULL,                 -- .github/workflows/x.yml, or dynamic/… for GitHub's own
+    state           TEXT NOT NULL,                 -- active | disabled_inactivity | disabled_manually | …
+    url             TEXT,
+    triggers        JSONB NOT NULL DEFAULT '[]',   -- the on: events in the file
+    crons           JSONB NOT NULL DEFAULT '[]',   -- its schedule: cron lines, UTC
+    file_error      TEXT,
+    created_at      TIMESTAMPTZ,
+    crons_since     TIMESTAMPTZ,                   -- when this schedule was first seen (or the workflow made)
+    state_since     TIMESTAMPTZ,
+    missed_seen_at  TIMESTAMPTZ,                   -- due times up to here have been checked for misses
+    seen_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS workflow_runs (
+    id              BIGINT PRIMARY KEY,            -- GitHub's run id
+    repo_id         INTEGER NOT NULL REFERENCES repos (id) ON DELETE CASCADE,
+    workflow_id     BIGINT,
+    name            TEXT NOT NULL DEFAULT '',
+    event           TEXT NOT NULL DEFAULT '',      -- push | pull_request | schedule | workflow_dispatch | …
+    status          TEXT NOT NULL DEFAULT '',      -- queued | in_progress | completed | …
+    conclusion      TEXT,                          -- success | failure | cancelled | skipped | timed_out | …
+    prior_conclusion TEXT,                         -- the result before a re-run
+    head_branch     TEXT,
+    head_sha        TEXT,
+    run_number      INTEGER,
+    run_attempt     INTEGER NOT NULL DEFAULT 1,
+    actor           TEXT,
+    url             TEXT,
+    created_at      TIMESTAMPTZ NOT NULL,
+    started_at      TIMESTAMPTZ,
+    updated_at      TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_wf ON workflow_runs (workflow_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_repo ON workflow_runs (repo_id, created_at);
 
 -- Settings edited in the dashboard (see settings.py). Secrets are encrypted.
 CREATE TABLE IF NOT EXISTS settings (

@@ -42,10 +42,10 @@
       <div class="field wide">
         <span class="label">Webhook URL (paste into the App's settings on GitHub)</span>
         <div class="link-box"><code id="hook-url">{{ webhook_url }}</code><button type="button" class="btn small" data-copy="hook-url">Copy</button></div>
-        <span class="help">GitHub has to reach this address. Subscribe to: Pull request, Pull request review, Check suite, Push, Create, Delete. Without webhooks Branchwarden still polls on schedule.</span>
+        <span class="help">GitHub has to reach this address. Subscribe to: Pull request, Pull request review, Check suite, Push, Create, Delete, Workflow run. Without webhooks Branchwarden still polls on schedule.</span>
       </div>
     </div>
-    <div class="actions"><p class="hint">App permissions it needs: Pull requests read and write, Contents read, Metadata read, Members read (organisations), Checks read.</p><div class="end"><button type="submit" class="btn primary">Save App settings</button></div></div>
+    <div class="actions"><p class="hint">App permissions it needs: Pull requests read and write, Contents read, Metadata read, Members read (organisations), Checks read, Actions read.</p><div class="end"><button type="submit" class="btn primary">Save App settings</button></div></div>
   </form>
   {% if installs %}
   <div class="card panel" style="background: var(--bg)">
@@ -78,7 +78,7 @@
       </div>
       <div class="field">
         <span class="label">Permissions it needs (fine-grained)</span>
-        <div class="perm"><span class="badge muted">Pull requests: read and write</span><span class="badge muted">Contents: read</span><span class="badge muted">Metadata: read</span><span class="badge muted">Members: read (org)</span></div>
+        <div class="perm"><span class="badge muted">Pull requests: read and write</span><span class="badge muted">Contents: read</span><span class="badge muted">Metadata: read</span><span class="badge muted">Members: read (org)</span><span class="badge muted">Actions: read</span></div>
         <span class="help">Write only so reviewers can be requested. Branchwarden never pushes or deletes.</span>
       </div>
       <div class="field" style="justify-content: flex-end">

@@ -19,6 +19,7 @@ from psycopg2.extras import Json
 import analysis
 import db
 import settings
+import workflows
 from github import Client, Connections, GitHubError
 
 log = logging.getLogger("branchwarden.scanner")
@@ -355,6 +356,8 @@ def scan_repo(conn, client: Client, repo: dict) -> tuple[list[dict], int, int]:
                 events.append({"kind": state, "pr_id": before[n]["id"]})
 
     _store_branches(conn, repo["id"], branches, repo["full_name"], first)
+    default_head = next((b["head_oid"] for b in branches if b["name"] == repo["default_branch"]), None)
+    events += workflows.scan_repo(conn, client, repo, default_head)
     db.execute(conn, """UPDATE repos SET codeowners = %s, scanned_once = TRUE, last_scan_at = NOW(),
                                last_error = NULL WHERE id = %s""", (codeowners or None, repo["id"]))
     return events, len(prs), len(branches)

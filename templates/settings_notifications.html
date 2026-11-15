@@ -135,6 +135,14 @@
         <div class="inline-form">Every <select name="day" aria-label="Day">{% for d in days %}<option value="{{ d }}" {{ 'selected' if p.day == d }}>{{ d|capitalize }}day</option>{% endfor %}</select>
           at <input class="input num" name="time" value="{{ p.time }}" aria-label="Time"> (working-hours time zone), to <select name="target" aria-label="Where">{% include "_targets.html" %}</select></div>
         <label class="check"><input type="checkbox" name="mention" value="1" {{ 'checked' if p.mention }}> {{ "@mention each stale branch's last committer" if r.kind == 'digest' else '@mention each MVP' }}</label>
+      {% elif r.key == 'wf_failed' %}
+        <div class="inline-form">For runs on <select name="scope" aria-label="Which runs">{% for s, label in wf_scopes %}<option value="{{ s }}" {{ 'selected' if p.scope == s }}>{{ label }}</option>{% endfor %}</select>, post to <select name="target" aria-label="Where">{% include "_targets.html" %}</select></div>
+        <label class="check"><input type="checkbox" name="fixed" value="1" {{ 'checked' if p.fixed }}> Also post when it passes again</label>
+        <label class="check"><input type="checkbox" name="mention" value="1" {{ 'checked' if p.mention }}> @mention who started the run (not for scheduled runs)</label>
+        <p class="hint">One message when a workflow goes from passing to failing on a branch, not one per failed run. Failures on PR branches already show on the PR.</p>
+      {% elif r.key == 'wf_schedule' %}
+        <div class="inline-form">Post to <select name="target" aria-label="Where">{% include "_targets.html" %}</select></div>
+        <p class="hint">Needs the Actions: read permission. Due times come from each workflow's cron schedule, in UTC.</p>
       {% else %}
         <div class="inline-form">Post to <select name="target" aria-label="Where">{% include "_targets.html" %}</select></div>
         <label class="check"><input type="checkbox" name="mention" value="1" {{ 'checked' if p.mention }}> @mention {{ 'the requested reviewers' if r.key == 'opened' else 'the author' if r.key == 'review' else 'people' }}</label>
