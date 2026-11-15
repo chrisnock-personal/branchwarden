@@ -23,7 +23,8 @@
     {{ csrf() }}
     <h2>Which GitHub login is yours?</h2>
     <p class="hint">My work lists the reviews asked of you, your open pull requests and your branches. People who sign in with GitHub get this automatically.</p>
-    <div class="field"><label for="gl2">GitHub login</label><input class="input mono" id="gl2" name="login" placeholder="octocat" required autofocus></div>
+    <div class="field"><label for="gl2">GitHub login</label><input class="input mono" id="gl2" name="login" placeholder="{{ 'dana' if demo_loaded else 'octocat' }}" required autofocus>
+      {% if demo_loaded %}<span class="help">In the demo, try <span class="mono">dana</span>: three reviews are waiting on her. The others are sasha, morgan, lee, priya, tom, alex and sam.</span>{% endif %}</div>
     <div class="actions"><span></span><button class="btn primary" type="submit">Show my work</button></div>
   </form>
   {% else %}
