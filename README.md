@@ -180,11 +180,22 @@ GitHub Enterprise Server works too: set the API address to `https://host/api/v3`
   - PR opened, or marked ready for review
   - Review submitted (approved, or changes requested)
   - Merged, or closed without merging. The message notes when the branch was left behind.
+  - **Workflow failing or fixed:** once when a workflow goes from passing to
+    failing, and again when it passes. For scheduled runs only, scheduled runs
+    and the default branch (the default), or every branch. It can @mention who
+    started the run.
+  - **Scheduled run missed or workflow switched off:** a cron schedule that
+    didn't start in time (90 minutes, or longer where GitHub usually runs that
+    workflow late), or a scheduled workflow that GitHub, or someone, switched off.
+
+  PR messages carry buttons for the PR, for Branchwarden, and for up to two
+  tickets named in it (see *Pull request settings* below).
 - **Reminder rules:**
   - No reviewer assigned (after 4 working hours)
   - Waiting for review (24 working hours)
   - Changes requested with no new commits (3 days)
   - Approved but not merged (2 days, off by default)
+  - Stalled: no commits, reviews or comments (7 days, off by default)
 
   Each reminder has its own wait, repeat interval, maximum count, target
   channels, @mentions, a skip label, and an option to group PRs into one
@@ -213,6 +224,20 @@ GitHub Enterprise Server works too: set the API address to `https://host/api/v3`
     in the team total, but for nobody by name.
   - Bots are left out of every board.
 
+**Pull request settings** (*Settings › GitHub › Pull requests*):
+- **Big PRs:** from 500 lines changed (added plus removed) or 30 files, by
+  default. They get a badge and a filter, and Metrics compares review and
+  merge times by size.
+- **Stalled PRs:** no commits, reviews or comments for 7 days. Drafts never
+  stall. They get a badge, a filter and the reminder above.
+- **Ticket links:** a URL with `{key}`, such as
+  `https://company.atlassian.net/browse/{key}` or
+  `https://linear.app/team/issue/{key}`, and a pattern for the keys (by
+  default `ABC-123` style). Keys in PR titles, branch names and descriptions
+  are linked on the Pull requests and Branches pages and in messages, and
+  "No ticket" filters PRs without one. Only the keys are kept from a
+  description, never its text. With no link set, tickets aren't looked for.
+
 **Settings › People** matches GitHub logins to a Teams user principal name and
 a Slack member ID, so @mentions reach the right person. Anyone without a match
 appears as a bold name.
@@ -223,7 +248,7 @@ appears as a bold name.
 |---|---|
 | Admin | Everything: GitHub connections, channels and rules, people, the TLS certificate, users |
 | Member | What viewers can, plus request reviewers, snooze reminders, ignore branches and start a scan |
-| Viewer | Read the overview, pull requests, branches, metrics and MVP, and their own My work |
+| Viewer | Read the overview, pull requests, branches, repositories, workflows, metrics and MVP, and their own My work |
 
 People are added under *Settings › Users and access*. Each gets a one-time setup
 link that lasts 24 hours. Branchwarden doesn't send email, so you pass the link on.
@@ -274,8 +299,8 @@ of all repos:
   Errors never echo a webhook URL, since the URL is the secret.
 - **CI** runs the tests, `pip-audit` and `gitleaks` on every push.
 
-**Retention:** closed PRs are kept for 365 days, for the metrics. Messages and
-scans are kept for 90 days. Both are set under *Settings › GitHub*, and older
+**Retention:** closed PRs are kept for 365 days, for the metrics. Messages,
+workflow runs and scans are kept for 90 days. Both are set under *Settings › GitHub*, and older
 records are removed once an hour.
 
 **Reporting a vulnerability:** privately, through the repository's Security
@@ -334,7 +359,10 @@ releases of the image tag.
 
 The version is in `version.py`. It's shown at the foot of every page, in
 `/healthz`, and in the User-Agent sent to GitHub. Each release gets a
-[CHANGELOG](CHANGELOG.md) entry and a `vX.Y.Z` tag.
+[CHANGELOG](CHANGELOG.md) entry and a `vX.Y.Z` tag. Pushing the tag runs
+`.github/workflows/release.yml`, which checks the tag matches `version.py`,
+then builds the image for amd64 and arm64 and publishes it to
+`ghcr.io/chrisnock-personal/branchwarden` as `:X.Y.Z`, `:X.Y` and `:latest`.
 
 ## Development
 
@@ -348,8 +376,11 @@ The files:
 
 | File | What it does |
 |---|---|
-| `analysis.py` | PR states, branch statuses, CODEOWNERS, picking reviewers and working-hours maths. No I/O |
-| `scanner.py` | The GraphQL queries and turning a scan into rows and events |
+| `analysis.py` | PR states, branch statuses, CODEOWNERS, PR size and stalls, ticket keys, picking reviewers and working-hours maths. No I/O |
+| `scanner.py` | The GraphQL queries, skipping unchanged repos, scanning in parallel, importing past PRs, and turning a scan into rows and events |
+| `data.py` | Reading PRs and branches back with their state; whether scans have stopped |
+| `workflows.py` | GitHub Actions: workflow files, cron schedules, runs, missed runs, and the Workflows page |
+| `repos.py`, `repohealth.py` | The Repositories pages, and the repo settings they flag |
 | `rules.py` | Events, auto-assign, reminders and the digest |
 | `metrics.py`, `mvp.py`, `housekeeping.py` | The metrics and MVP pages; retention and the daily snapshot |
 | `ghlogin.py` | Sign in with GitHub |
@@ -358,6 +389,8 @@ The files:
 | `settings.py` | Encrypted settings, users and history |
 | `tls.py` | Certificates |
 | `worker.py` | The loop |
+| `healthcheck.py` | Container health checks, and the worker's heartbeat |
+| `deploy/quadlet/` | Podman quadlet files, to run as systemd services |
 | `dashboard.py`, `admin.py`, `templates/` | The web UI |
 
 ## Licence
