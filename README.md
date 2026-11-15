@@ -48,7 +48,8 @@ For an illustrated tour of every feature, see the
 
 ```bash
 cp .env.example .env              # set POSTGRES_PASSWORD (compose won't start without it)
-podman-compose up -d              # or docker compose; builds the image, starts Postgres, the worker and the dashboard
+podman-compose pull               # or docker compose; the published image, ghcr.io/chrisnock-personal/branchwarden
+podman-compose up -d              # starts Postgres, the worker and the dashboard
 podman-compose logs dashboard     # the one-time setup code, and the certificate's fingerprint
 ```
 
@@ -64,6 +65,15 @@ It also imports the pull requests merged or closed in the last 180 days, so
 Metrics and MVP have numbers from the start (the daily trend charts and branch
 prunes can't be imported: they start when Branchwarden does).
 After that, scans pick up new PRs, reviews, merges and closes.
+
+**Updating:** `podman-compose pull && podman-compose up -d`. Each release is
+published for amd64 and arm64 as `:<version>`, `:<major>.<minor>` and
+`:latest`. To stay on one, set `BRANCHWARDEN_VERSION` in `.env` (for example
+`0.2`, which gets that version's fixes). Releases and what changed are in
+[CHANGELOG.md](CHANGELOG.md).
+
+**Building it yourself:** `podman-compose build` makes the image from this
+checkout under the same name, and `up -d` then runs it.
 
 ## How it fits together
 

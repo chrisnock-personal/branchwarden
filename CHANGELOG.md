@@ -4,7 +4,15 @@ All notable changes to Branchwarden. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.2.1] - 2026-11-15
+
+### Added
+
+- **A published image** (#6): each release is built for amd64 and arm64 and
+  pushed to `ghcr.io/chrisnock-personal/branchwarden` as `:<version>`,
+  `:<major>.<minor>` and `:latest`. The compose file runs it by default
+  (`BRANCHWARDEN_VERSION` in `.env` picks a version); `podman-compose build`
+  still builds from the checkout.
 
 ### Fixed
 

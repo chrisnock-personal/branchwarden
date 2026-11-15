@@ -20,8 +20,9 @@ services:
       retries: 10
 
   worker:
+    # The published image; `podman-compose build` makes it from this checkout instead.
+    image: ghcr.io/chrisnock-personal/branchwarden:${BRANCHWARDEN_VERSION:-latest}
     build: .
-    image: localhost/branchwarden:latest
     restart: unless-stopped
     depends_on:
       db:
@@ -33,7 +34,7 @@ services:
       - keys:/keys:Z
 
   dashboard:
-    image: localhost/branchwarden:latest
+    image: ghcr.io/chrisnock-personal/branchwarden:${BRANCHWARDEN_VERSION:-latest}
     restart: unless-stopped
     entrypoint: ["./entrypoint.sh"]
     depends_on:
