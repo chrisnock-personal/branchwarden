@@ -65,6 +65,7 @@ DEFAULTS = {
     "TICKET_URL": ("Ticket link", ""),
     "RETAIN_LOG_DAYS": ("Keep messages and scans for (days)", "90"),
     "GITHUB_LOGIN_ENABLED": ("Sign in with GitHub", "false"),
+    "DEMO_MODE": ("Demo data loaded", "false"),
     "GITHUB_OAUTH_CLIENT_ID": ("GitHub sign-in client ID", ""),
     "GITHUB_OAUTH_CLIENT_SECRET": ("GitHub sign-in client secret", ""),
     "GITHUB_ROLE_ADMIN": ("Admins: GitHub teams or logins", ""),

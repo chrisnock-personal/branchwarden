@@ -73,6 +73,11 @@
     {% endif %}
   </div>
 </header>
+{% if demo_loaded %}
+<div class="flash info worker-banner" role="status">
+  <span><strong>Demo data.</strong> Everything here is made up: the demo-org organisation, its people, pull requests and history. GitHub isn't scanned and no messages are sent. Remove it with <span class="mono">python demo.py --remove</span> before connecting GitHub.</span>
+</div>
+{% endif %}
 {% if worker_overdue %}
 <div class="flash warn worker-banner" role="alert">
   <span><strong>Scans have stopped.</strong>

@@ -61,9 +61,14 @@ def _last_full_scan(conn):
 def run_scan(conn, values: dict, trigger: str, only: set | None = None) -> scanner.ScanResult:
     """Scan every enabled account (or just the repos in `only`), log it, and
     queue messages for what happened."""
+    result = scanner.ScanResult()
+    if settings.flag(values, "DEMO_MODE"):
+        db.execute(conn, """INSERT INTO scan_log (trigger, finished_at, error) VALUES (%s, NOW(), %s)""",
+                   (trigger, "Demo data is loaded: GitHub isn't scanned until it's removed (python demo.py --remove)"))
+        conn.commit()
+        return result
     log_id = db.one(conn, "INSERT INTO scan_log (trigger) VALUES (%s) RETURNING id", (trigger,))["id"]
     conn.commit()
-    result = scanner.ScanResult()
     conns = Connections(values)
     targets = db.rows(conn, "SELECT * FROM targets WHERE enabled ORDER BY id")
     if not conns.configured:
@@ -126,7 +131,7 @@ def tick(state: dict, *, force_full: bool = False) -> None:
             conn.commit()
         if force_full or time.monotonic() - state.get("reminders_at", 0) >= REMINDER_EVERY:
             state["reminders_at"] = time.monotonic()
-            assigned = rules.run_auto_assign(conn, values, now)
+            assigned = 0 if settings.flag(values, "DEMO_MODE") else rules.run_auto_assign(conn, values, now)
             conn.commit()
             if assigned:
                 log.info("Auto-assigned reviewers on %d pull request%s", assigned, "s" if assigned != 1 else "")

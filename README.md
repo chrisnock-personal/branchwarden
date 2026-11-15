@@ -75,6 +75,20 @@ Metrics and MVP have numbers from the start (the daily trend charts and branch
 prunes can't be imported: they start when Branchwarden does).
 After that, scans pick up new PRs, reviews, merges and closes.
 
+**Trying it without GitHub:** after creating the first admin, load made-up
+activity for a "demo-org" organisation: six repositories, eight people, open
+PRs in every state, five weeks of merges, reviews, branch deletions, daily
+snapshots and workflow runs.
+
+```bash
+podman-compose exec worker python demo.py            # load it
+podman-compose exec worker python demo.py --remove   # take it out, before connecting GitHub
+```
+
+It only loads into an empty Branchwarden, with no token or App set up. While
+it's there, every page says so, nothing is scanned or sent, and connecting
+GitHub is refused until it's removed.
+
 **Updating:** `podman-compose pull && podman-compose up -d`. Each release is
 published for amd64 and arm64 as `:<version>`, `:<major>.<minor>` and
 `:latest`. To stay on one, set `BRANCHWARDEN_VERSION` in `.env` (for example
@@ -372,6 +386,23 @@ python -m pytest -q          # the pure logic, rendering, crypto and TLS checks;
 pip-audit -r requirements.txt
 ```
 
+With a throwaway Postgres, the integration tests also run: the scanner end to
+end against a stand-in for GitHub (first-scan silence, then opened, ready,
+review, merged and closed events, and branch bookkeeping), skipping unchanged
+repos, routing and the delivery queue (sent, retried with back-off, failed,
+switched-off channels), workflows, the demo data, and every page rendering.
+The browser test adds Chromium: first-run setup, every section from the
+header, a repo page, filters, a workflow row, the theme switch, a form and
+the menu. CI runs both on every push.
+
+```bash
+TEST_DATABASE_URL=postgresql://user:pass@localhost:5432/branchwarden_test python -m pytest -q
+python -m playwright install chromium
+BROWSER_TESTS=1 TEST_DATABASE_URL=… python -m pytest -q tests/test_browser.py
+```
+
+The test database is emptied for every test: never point it at real data.
+
 The files:
 
 | File | What it does |
@@ -389,6 +420,7 @@ The files:
 | `settings.py` | Encrypted settings, users and history |
 | `tls.py` | Certificates |
 | `worker.py` | The loop |
+| `demo.py` | Loading and removing the demo data |
 | `healthcheck.py` | Container health checks, and the worker's heartbeat |
 | `deploy/quadlet/` | Podman quadlet files, to run as systemd services |
 | `dashboard.py`, `admin.py`, `templates/` | The web UI |

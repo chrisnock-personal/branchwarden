@@ -10,6 +10,20 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # A throwaway Postgres for the integration and browser tests (tests/test_integration.py, tests/test_browser.py).
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: branchwarden
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: branchwarden_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U branchwarden" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://branchwarden:ci-only@localhost:5432/branchwarden_test
+      BROWSER_TESTS: "1"
     steps:
       - uses: actions/checkout@v5
         with:
@@ -18,6 +32,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements-dev.txt
+      - name: Chromium for the browser test
+        run: python -m playwright install --with-deps chromium
       - name: Tests
         run: python -m pytest -q
       - name: Known vulnerabilities in dependencies

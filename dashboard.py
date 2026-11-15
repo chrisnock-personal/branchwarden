@@ -106,6 +106,15 @@ def _reviews_waiting() -> Optional[int]:
         return None
 
 
+def _demo_loaded() -> bool:
+    try:
+        with db.get_conn() as conn:
+            row = db.one(conn, "SELECT value FROM settings WHERE key = 'DEMO_MODE'")
+        return bool(row) and row["value"].lower() == "true"
+    except Exception:  # never let the banner break a page
+        return False
+
+
 def _worker_overdue() -> Optional[dict]:
     try:
         with db.get_conn() as conn:
@@ -119,7 +128,8 @@ def _globals():
     signed_in = bool(g.get("user"))
     return {"can_act": can_act(), "now": datetime.now(timezone.utc), "version": VERSION,
             "reviews_waiting": _reviews_waiting() if signed_in else None,
-            "worker_overdue": _worker_overdue() if signed_in else None}
+            "worker_overdue": _worker_overdue() if signed_in else None,
+            "demo_loaded": _demo_loaded() if signed_in else False}
 
 
 @app.template_filter("ago")

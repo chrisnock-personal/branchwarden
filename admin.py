@@ -331,8 +331,21 @@ def github():
         intervals=settings.SCAN_INTERVALS, suggested_secret=secrets.token_hex(24))
 
 
+def _demo_refusal(anchor: str):
+    """While demo data is loaded, GitHub can't be connected: demo and real data never mix."""
+    with db.get_conn() as conn:
+        row = db.one(conn, "SELECT value FROM settings WHERE key = 'DEMO_MODE'")
+    if row and row["value"].lower() == "true":
+        flash("Demo data is loaded. Remove it first (python demo.py --remove), then connect GitHub.", "bad")
+        return redirect(url_for("admin.github") + anchor)
+    return None
+
+
 @bp.post("/settings/github/app")
 def github_app():
+    refused = _demo_refusal("#app")
+    if refused:
+        return refused
     form = request.form
     changes = {"GITHUB_APP_ENABLED": "true" if form.get("GITHUB_APP_ENABLED") else "false",
                "GITHUB_APP_ID": form.get("GITHUB_APP_ID", "").strip()}
@@ -360,6 +373,9 @@ def github_app():
 
 @bp.post("/settings/github/token")
 def github_token():
+    refused = _demo_refusal("#token")
+    if refused:
+        return refused
     form = request.form
     changes = {"GITHUB_TOKEN_ENABLED": "true" if form.get("GITHUB_TOKEN_ENABLED") else "false"}
     token = form.get("GITHUB_TOKEN", "").strip()
@@ -476,6 +492,9 @@ LOGIN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
 
 @bp.post("/settings/targets/new")
 def target_new():
+    refused = _demo_refusal("#targets")
+    if refused:
+        return refused
     login = request.form.get("login", "").strip().lstrip("@").lower()
     kind = request.form.get("kind", "org")
     via = request.form.get("via", "auto")

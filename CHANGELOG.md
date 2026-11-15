@@ -4,6 +4,22 @@ All notable changes to Branchwarden. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Demo mode** (#9): `python demo.py` loads made-up activity for a demo-org
+  organisation (six repositories, eight people, open PRs in every state, five
+  weeks of merges, reviews, branch deletions, daily snapshots and workflow
+  runs); `--remove` takes it out. It only loads into an empty Branchwarden,
+  and while it's loaded every page says so, the worker doesn't scan, and
+  connecting GitHub is refused.
+- **Integration and browser tests** (#5): against a real Postgres, the scanner
+  end to end with a stand-in for GitHub, events and routing, the delivery
+  queue's retries and failures, workflows, skipping unchanged repos, the demo
+  data and every page; and a Playwright run through setup and every section.
+  CI runs them on every push.
+
 ## [0.3.0] - 2026-11-15
 
 ### Added
