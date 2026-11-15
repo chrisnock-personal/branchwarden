@@ -1,0 +1,3 @@
+# The same volume name as the compose file uses, so moving from compose keeps the data.
+[Volume]
+VolumeName=branchwarden_certs

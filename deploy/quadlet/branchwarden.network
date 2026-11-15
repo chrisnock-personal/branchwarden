@@ -1,0 +1,3 @@
+# Branchwarden's own network: the database is only reachable on it.
+[Network]
+NetworkName=branchwarden

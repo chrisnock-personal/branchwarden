@@ -1,0 +1,28 @@
+[Unit]
+Description=Branchwarden dashboard (HTTPS)
+Requires=branchwarden-db.service
+After=branchwarden-db.service branchwarden-worker.service
+Wants=branchwarden-worker.service
+
+[Container]
+ContainerName=branchwarden-dashboard
+Image=ghcr.io/chrisnock-personal/branchwarden:latest
+Entrypoint=./entrypoint.sh
+Network=branchwarden.network
+PublishPort=8443:8443
+EnvironmentFile=%h/.config/branchwarden/branchwarden.env
+Environment=POSTGRES_HOST=branchwarden-db
+Volume=branchwarden-keys.volume:/keys:Z
+Volume=branchwarden-certs.volume:/certs:Z
+HealthCmd=python healthcheck.py dashboard
+HealthInterval=30s
+HealthTimeout=10s
+HealthRetries=3
+HealthStartPeriod=30s
+# AutoUpdate=registry
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,25 @@
+[Unit]
+Description=Branchwarden database
+
+[Container]
+ContainerName=branchwarden-db
+Image=docker.io/library/postgres:16-alpine
+Network=branchwarden.network
+# Not published: only the worker and dashboard reach it.
+Volume=branchwarden-pgdata.volume:/var/lib/postgresql/data:Z
+# POSTGRES_PASSWORD comes from here. The user and database name are set below and
+# win over the file: to use others, change them here, in HealthCmd, and give the
+# worker and dashboard the same POSTGRES_USER and POSTGRES_DB in the file.
+EnvironmentFile=%h/.config/branchwarden/branchwarden.env
+Environment=POSTGRES_USER=branchwarden POSTGRES_DB=branchwarden
+HealthCmd=pg_isready -U branchwarden
+HealthInterval=5s
+HealthRetries=10
+# The worker and dashboard start once it's ready.
+Notify=healthy
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target

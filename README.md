@@ -95,10 +95,21 @@ checkout under the same name, and `up -d` then runs it.
 
 - **The worker** (`worker.py`) runs a full scan on a schedule (every 10 minutes
   by default). Repos that a webhook mentions, or whose reviewers changed, are
-  rescanned within seconds. Each repo takes about three GraphQL queries:
-  repositories, open PRs (with reviews, checks and changed files), and branches
-  (each with its newest PR and how far it is ahead of or behind the default
-  branch). Comparing each scan with the last gives the events.
+  rescanned within seconds. Reading a repo takes about three GraphQL queries:
+  open PRs (with reviews, checks and changed files), branches (each with its
+  newest PR and how far it is ahead of or behind the default branch), and its
+  workflows. Comparing each scan with the last gives the events.
+  - **Unchanged repos are skipped.** The query that lists an account's repos
+    (100 per request) also reads each one's last push, its number of open PRs
+    and when the newest of them changed. A scheduled scan skips the PR and
+    branch queries for a repo where none of that changed, but reads every repo
+    in full at least once an hour (CI results don't show in those three). Most
+    repos in a large organisation are quiet, so most scans read only a few.
+  - **Four repos at a time,** each on its own connection. When GitHub answers
+    with a secondary rate limit, the worker waits as long as GitHub asks (up
+    to two minutes) and tries again.
+  - *Settings › Deliveries* lists each scan's time, the repos it read and
+    skipped, and the requests it made.
 - **The dashboard** (`dashboard.py`, `admin.py`) serves the pages and the
   webhook endpoint. A webhook only queues a rescan of its repo, so a forged or replayed event
   can't change what Branchwarden shows. Events without a valid
@@ -262,6 +273,38 @@ records are removed once an hour.
 encrypted disk if PR titles and branch names are sensitive. Back up the `keys`
 volume with the database: without it, stored secrets can't be read.
 
+## Health checks
+
+- **Containers:** compose checks the dashboard with `/healthz` (which also
+  checks the database) and the worker with its heartbeat. The worker touches a
+  file every few seconds, and after each repo while a scan runs, so a long scan
+  isn't mistaken for a stuck one. Both are `python healthcheck.py dashboard|worker`.
+- **On the dashboard:** when no full scan has finished for more than twice the
+  scan interval (and none is running), every page shows a banner saying that
+  pull requests, reminders and messages are on hold until the worker runs again.
+
+## Running as a service (Podman quadlets)
+
+`deploy/quadlet/` has quadlet files to run Branchwarden as systemd user services
+instead of compose: the database, the worker, the dashboard, their network,
+and volumes under the same names compose uses, so a compose install moves over
+with its data and key.
+
+```bash
+mkdir -p ~/.config/containers/systemd/branchwarden ~/.config/branchwarden
+cp deploy/quadlet/* ~/.config/containers/systemd/branchwarden/
+install -m 600 .env ~/.config/branchwarden/branchwarden.env   # the same settings as compose's .env
+podman-compose down                                           # if moving from compose (volumes are kept)
+systemctl --user daemon-reload
+systemctl --user start branchwarden-dashboard                 # starts the database and the worker too
+loginctl enable-linger "$USER"                                # keep them running after you log out
+```
+
+They start at boot (`WantedBy=default.target`). The dashboard is published on
+8443; change `PublishPort` in `branchwarden-dashboard.container` for another
+port. Uncomment `AutoUpdate=registry` to let `podman auto-update` install new
+releases of the image tag.
+
 ## Configuration (.env)
 
 | Variable | Default | |
@@ -269,6 +312,7 @@ volume with the database: without it, stored secrets can't be read.
 | `POSTGRES_PASSWORD` | required | |
 | `BRANCHWARDEN_SECRET_KEY` | generated into the `keys` volume | 32+ characters if you set it |
 | `BRANCHWARDEN_SECRET_KEY_PREVIOUS` | | for rotation |
+| `BRANCHWARDEN_VERSION` | `latest` | the published image to run, e.g. `0.2` |
 | `DASHBOARD_EXPOSE` | `8443` | where compose publishes HTTPS, e.g. `127.0.0.1:8443` |
 | `TLS_HOSTNAMES` | | extra names/IPs for the self-signed certificate |
 | `BRANCHWARDEN_TLS` | `on` | `off` only behind a TLS proxy (with `BRANCHWARDEN_BEHIND_PROXY=true`) |

@@ -11,6 +11,7 @@ there, so adding an organisation doesn't flood the channels.
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -24,11 +25,17 @@ from github import Client, Connections, GitHubError
 
 log = logging.getLogger("branchwarden.scanner")
 
+SCAN_THREADS = 4                       # repos scanned at once: well inside GitHub's secondary limits
+REFRESH = timedelta(minutes=60)        # every repo is read in full at least this often (CI states, reviews)
+
 RATE = "rateLimit { remaining limit resetAt }"
 
 REPO_FIELDS = """
   pageInfo { hasNextPage endCursor }
-  nodes { name nameWithOwner url isArchived isFork isPrivate owner { login } defaultBranchRef { name } }
+  nodes { name nameWithOwner url isArchived isFork isPrivate owner { login } defaultBranchRef { name }
+          pushedAt
+          pullRequests(states: OPEN, first: 1, orderBy: {field: UPDATED_AT, direction: DESC}) {
+            totalCount nodes { updatedAt } } }
 """
 
 ORG_REPOS = f"""
@@ -49,6 +56,9 @@ ONE_REPO = f"""
 query($owner: String!, $name: String!) {{
   repository(owner: $owner, name: $name) {{
     name nameWithOwner url isArchived isFork isPrivate owner {{ login }} defaultBranchRef {{ name }}
+    pushedAt
+    pullRequests(states: OPEN, first: 1, orderBy: {{field: UPDATED_AT, direction: DESC}}) {{
+      totalCount nodes {{ updatedAt }} }}
   }}
   {RATE}
 }}"""
@@ -442,8 +452,28 @@ def scan_repo(conn, client: Client, repo: dict, values: Optional[dict] = None) -
     default_head = next((b["head_oid"] for b in branches if b["name"] == repo["default_branch"]), None)
     events += workflows.scan_repo(conn, client, repo, default_head)
     db.execute(conn, """UPDATE repos SET codeowners = %s, scanned_once = TRUE, last_scan_at = NOW(),
-                               last_error = NULL WHERE id = %s""", (codeowners or None, repo["id"]))
+                               full_scan_at = NOW(), scan_sig = COALESCE(%s, scan_sig), last_error = NULL
+                         WHERE id = %s""", (codeowners or None, repo.get("new_sig"), repo["id"]))
     return events, len(prs), len(branches)
+
+
+def signature(node: dict) -> Optional[str]:
+    """What changes when a repo needs reading again: a push (commits, new or
+    deleted branches, merges), a PR opened or closed, or an open PR updated
+    (reviews, comments, edits). CI results don't change it: REFRESH covers those,
+    and the App's check webhooks rescan straight away."""
+    if "pushedAt" not in node:
+        return None
+    prs = node.get("pullRequests") or {}
+    newest = ((prs.get("nodes") or [None])[0] or {}).get("updatedAt")
+    return f"{node.get('pushedAt')}|{prs.get('totalCount')}|{newest}"
+
+
+def unchanged(repo: dict, sig: Optional[str], now: datetime) -> bool:
+    """Whether a full scan can skip this repo's PR and branch queries."""
+    return bool(sig and repo.get("scan_sig") == sig and repo.get("scanned_once") and repo.get("history_at")
+                and not repo.get("last_error") and repo.get("full_scan_at")
+                and now - repo["full_scan_at"] < REFRESH)
 
 
 def _store_repo(conn, target: dict, node: dict, values: dict) -> dict:
@@ -463,7 +493,34 @@ def _store_repo(conn, target: dict, node: dict, values: dict) -> dict:
             included = EXCLUDED.included
         RETURNING *""", (target["id"], node["owner"]["login"], node["name"], full, node["url"],
                          (node.get("defaultBranchRef") or {}).get("name"), node["isArchived"],
-                         node["isFork"], node["isPrivate"], included))
+                         node["isFork"], node["isPrivate"], included)) | {"new_sig": signature(node)}
+
+
+def _scan_one(client: Client, repo: dict, values: dict, skip: bool, workflows_too: bool) -> dict:
+    """Scan one repo on its own database connection (repos are scanned in
+    parallel). A skipped repo, unchanged since its last full read, only has
+    its workflow runs read (scheduled runs happen without pushes)."""
+    out = {"events": [], "prs": 0, "branches": 0, "skipped": 0, "error": None}
+    with db.get_conn() as conn:
+        try:
+            if skip:
+                if workflows_too:
+                    out["events"] = workflows.scan_repo(conn, client, repo, repo.get("workflows_oid"))
+                counts = db.one(conn, """SELECT (SELECT COUNT(*) FROM pull_requests WHERE repo_id = %s AND state = 'open') AS prs,
+                                                (SELECT COUNT(*) FROM branches WHERE repo_id = %s) AS branches""",
+                                (repo["id"], repo["id"]))
+                db.execute(conn, "UPDATE repos SET last_scan_at = NOW() WHERE id = %s", (repo["id"],))
+                out.update(prs=counts["prs"], branches=counts["branches"], skipped=1)
+            else:
+                out["events"], out["prs"], out["branches"] = scan_repo(conn, client, repo, values)
+            conn.commit()
+        except GitHubError as exc:
+            conn.rollback()
+            db.execute(conn, "UPDATE repos SET last_error = %s, last_scan_at = NOW() WHERE id = %s",
+                       (str(exc), repo["id"]))
+            conn.commit()
+            out["error"] = f"{repo['full_name']}: {exc}"
+    return out
 
 
 class ScanResult:
@@ -474,10 +531,12 @@ class ScanResult:
         self.branches = 0
         self.errors: list[str] = []
         self.rate = None
+        self.skipped = 0        # repos unchanged since their last full read
+        self.requests = 0       # calls to GitHub
 
 
 def scan_target(conn, conns: Connections, target: dict, values: dict, result: ScanResult,
-                only: Optional[set] = None) -> None:
+                only: Optional[set] = None, progress=None) -> None:
     """Scan one account: all its repos, or just those named in `only`."""
     try:
         client = conns.client_for(target["login"], target["via"])
@@ -487,6 +546,7 @@ def scan_target(conn, conns: Connections, target: dict, values: dict, result: Sc
         result.errors.append(f"{target['login']}: {exc}")
         conn.commit()
         return
+    before = client.requests
     try:
         if only is None:
             nodes = list_repos(client, target)
@@ -509,22 +569,28 @@ def scan_target(conn, conns: Connections, target: dict, values: dict, result: Sc
         conn.commit()
         return
 
-    for repo in repos:
-        if not repo["included"]:
-            continue
-        try:
-            events, n_prs, n_branches = scan_repo(conn, client, repo, values)
-            conn.commit()
-            result.events.extend(events)
+    now = datetime.now(timezone.utc)
+    with_workflows = {r["repo_id"] for r in db.rows(conn, "SELECT DISTINCT repo_id FROM workflows")}
+    todo = [r for r in repos if r["included"]]
+    # Only a scheduled full scan skips: a webhook or reviewer change asked for these repos.
+    skip = {r["id"] for r in todo if only is None and unchanged(r, r.get("new_sig"), now)}
+    with ThreadPoolExecutor(max_workers=SCAN_THREADS, thread_name_prefix="scan") as pool:
+        futures = [pool.submit(_scan_one, client, repo, values, repo["id"] in skip,
+                               repo["id"] in with_workflows or not repo.get("workflows_scanned"))
+                   for repo in todo]
+        for f in as_completed(futures):
+            if progress:
+                progress()
+            out = f.result()
+            if out["error"]:
+                result.errors.append(out["error"])
+                continue
+            result.events.extend(out["events"])
             result.repos += 1
-            result.prs += n_prs
-            result.branches += n_branches
-        except GitHubError as exc:
-            conn.rollback()
-            db.execute(conn, "UPDATE repos SET last_error = %s, last_scan_at = NOW() WHERE id = %s",
-                       (str(exc), repo["id"]))
-            conn.commit()
-            result.errors.append(f"{repo['full_name']}: {exc}")
+            result.skipped += out["skipped"]
+            result.prs += out["prs"]
+            result.branches += out["branches"]
+    result.requests += client.requests - before
     result.rate = client.rate
     if client.label == "token" and client.token_expires:
         settings.save(conn, {"GITHUB_TOKEN_EXPIRES": client.token_expires}, "Branchwarden", record=False)

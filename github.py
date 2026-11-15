@@ -58,6 +58,28 @@ def web_url(api_url: str) -> str:
     return api[: -len("/api/v3")] if api.endswith("/api/v3") else api
 
 
+MAX_WAIT = 120     # seconds; a longer wait is left to the next scan
+
+
+def retry_after(resp) -> Optional[int]:
+    """Seconds to wait before trying again, when GitHub answers with a secondary
+    rate limit (403 or 429 with Retry-After, or saying so); otherwise None. A
+    used-up hourly budget (x-ratelimit-remaining: 0) isn't retried: it resets
+    on the hour, and the next scan picks up from there."""
+    if resp.status_code not in (403, 429):
+        return None
+    header = resp.headers.get("retry-after")
+    if header and header.isdigit():
+        return min(int(header), MAX_WAIT)
+    if resp.headers.get("x-ratelimit-remaining") == "0":
+        return None
+    try:
+        text = resp.text.lower()
+    except Exception:  # an unreadable body: not one to wait for
+        return None
+    return 60 if "secondary rate limit" in text else None
+
+
 def verify_signature(secret: str, body: bytes, header: str) -> bool:
     """Check a webhook's X-Hub-Signature-256 header."""
     if not secret or not header or not header.startswith("sha256="):
@@ -83,7 +105,33 @@ class Client:
         self.label = label                  # "app" or "token"
         self.rate = RateLimit()
         self.token_expires: Optional[str] = None
-        self.session = requests.Session()
+        self.requests = 0                   # calls made, for the scan log
+        self._local = threading.local()     # a requests.Session per thread: scans run repos in parallel
+        self._count_lock = threading.Lock()
+
+    @property
+    def session(self) -> requests.Session:
+        s = getattr(self._local, "session", None)
+        if s is None:
+            s = self._local.session = requests.Session()
+        return s
+
+    def _send(self, method: str, url: str, **kwargs) -> requests.Response:
+        """One HTTP call, waiting and trying again (twice at most) when GitHub
+        says to slow down: a secondary rate limit, for too many requests at once."""
+        for attempt in range(3):
+            with self._count_lock:
+                self.requests += 1
+            try:
+                resp = self.session.request(method, url, headers=self._headers(), **kwargs)
+            except requests.RequestException as exc:
+                raise GitHubError(f"can't reach GitHub ({type(exc).__name__})") from None
+            wait = retry_after(resp)
+            if wait is None or attempt == 2:
+                return resp
+            log.info("GitHub asked to slow down: waiting %d s", wait)
+            time.sleep(wait)
+        return resp
 
     def _headers(self) -> dict:
         return {"Authorization": f"Bearer {self._token_source()}",
@@ -103,10 +151,7 @@ class Client:
 
     def rest(self, method: str, path: str, **kwargs) -> requests.Response:
         url = path if path.startswith("http") else f"{self.api_url}{path}"
-        try:
-            resp = self.session.request(method, url, headers=self._headers(), timeout=TIMEOUT, **kwargs)
-        except requests.RequestException as exc:
-            raise GitHubError(f"can't reach GitHub ({type(exc).__name__})") from None
+        resp = self._send(method, url, timeout=TIMEOUT, **kwargs)
         self._note(resp)
         if resp.status_code >= 400:
             raise GitHubError(_error_text(resp), resp.status_code)
@@ -125,11 +170,8 @@ class Client:
         return out
 
     def graphql(self, query: str, variables: Optional[dict] = None) -> dict:
-        try:
-            resp = self.session.post(graphql_url(self.api_url), headers=self._headers(), timeout=60,
-                                     json={"query": query, "variables": variables or {}})
-        except requests.RequestException as exc:
-            raise GitHubError(f"can't reach GitHub ({type(exc).__name__})") from None
+        resp = self._send("POST", graphql_url(self.api_url), timeout=60,
+                          json={"query": query, "variables": variables or {}})
         self._note(resp)
         if resp.status_code >= 400:
             raise GitHubError(_error_text(resp), resp.status_code)

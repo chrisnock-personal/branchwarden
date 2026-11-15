@@ -440,3 +440,4 @@ details.wf[open] > .wf-row { background: var(--surface2); }
   .wf-strip { grid-column: 1 / -1; grid-row: 2; }
   .wf-stats { grid-row: 1; grid-column: 2; }
 }
+.worker-banner { max-width: 1360px; margin: 16px auto 0; width: calc(100% - 2 * clamp(16px, 3vw, 32px)); color: var(--text); }

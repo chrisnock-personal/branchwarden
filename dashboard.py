@@ -104,10 +104,20 @@ def _reviews_waiting() -> Optional[int]:
         return None
 
 
+def _worker_overdue() -> Optional[dict]:
+    try:
+        with db.get_conn() as conn:
+            return data.worker_overdue(conn)
+    except Exception:  # never let the banner break a page
+        return None
+
+
 @app.context_processor
 def _globals():
+    signed_in = bool(g.get("user"))
     return {"can_act": can_act(), "now": datetime.now(timezone.utc), "version": VERSION,
-            "reviews_waiting": _reviews_waiting() if g.get("user") else None}
+            "reviews_waiting": _reviews_waiting() if signed_in else None,
+            "worker_overdue": _worker_overdue() if signed_in else None}
 
 
 @app.template_filter("ago")

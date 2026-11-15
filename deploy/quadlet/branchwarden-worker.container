@@ -1,0 +1,25 @@
+[Unit]
+Description=Branchwarden worker (scans, rules and delivery)
+Requires=branchwarden-db.service
+After=branchwarden-db.service
+
+[Container]
+ContainerName=branchwarden-worker
+Image=ghcr.io/chrisnock-personal/branchwarden:latest
+Network=branchwarden.network
+EnvironmentFile=%h/.config/branchwarden/branchwarden.env
+Environment=POSTGRES_HOST=branchwarden-db
+Volume=branchwarden-keys.volume:/keys:Z
+HealthCmd=python healthcheck.py worker
+HealthInterval=30s
+HealthTimeout=10s
+HealthRetries=3
+HealthStartPeriod=60s
+# Uncomment to let `podman auto-update` pull new releases of this tag:
+# AutoUpdate=registry
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target

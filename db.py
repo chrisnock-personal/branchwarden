@@ -291,6 +291,13 @@ CREATE INDEX IF NOT EXISTS idx_branch_deletions_at ON branch_deletions (deleted_
 -- When a repo's merged and closed PRs were imported (once, so Metrics and MVP start with numbers).
 ALTER TABLE repos ADD COLUMN IF NOT EXISTS history_at TIMESTAMPTZ;
 
+-- Faster scans: what the repo looked like at its last full read (push time, open
+-- PRs, newest PR update), so an unchanged repo can be skipped (see scanner.py).
+ALTER TABLE repos ADD COLUMN IF NOT EXISTS scan_sig TEXT;
+ALTER TABLE repos ADD COLUMN IF NOT EXISTS full_scan_at TIMESTAMPTZ;
+ALTER TABLE scan_log ADD COLUMN IF NOT EXISTS skipped INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE scan_log ADD COLUMN IF NOT EXISTS requests INTEGER;
+
 -- GitHub Actions workflows (see workflows.py).
 ALTER TABLE repos ADD COLUMN IF NOT EXISTS workflows_scanned BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE repos ADD COLUMN IF NOT EXISTS workflows_oid TEXT;       -- default branch head when the files were read

@@ -4,6 +4,28 @@ All notable changes to Branchwarden. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Health checks** (#4): compose checks the dashboard (`/healthz`, which also
+  checks the database) and the worker (a heartbeat it touches every few
+  seconds and after each repo during a scan), with `healthcheck.py`.
+- **A banner on every page when scans have stopped:** no full scan finished
+  for more than twice the scan interval, and none running.
+- **Podman quadlets** in `deploy/quadlet/`, to run as systemd user services,
+  using the same volumes as compose.
+
+### Changed
+
+- **Faster scans for large organisations** (#2):
+  - A scheduled scan skips the PR and branch queries for repos whose last
+    push, open PR count and newest PR update haven't changed. Every repo is
+    still read in full at least hourly.
+  - Four repos are scanned at a time.
+  - The worker waits and retries when GitHub returns a secondary rate limit.
+  - *Settings › Deliveries* shows each scan's skipped repos and requests made.
+
 ## [0.2.1] - 2026-11-15
 
 ### Added

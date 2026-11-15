@@ -35,6 +35,7 @@ load_dotenv()
 import psycopg2  # noqa: E402
 
 import db  # noqa: E402
+import healthcheck  # noqa: E402
 import housekeeping  # noqa: E402
 import notify  # noqa: E402
 import rules  # noqa: E402
@@ -72,25 +73,28 @@ def run_scan(conn, values: dict, trigger: str, only: set | None = None) -> scann
     else:
         for t in targets:
             if only is None:
-                scanner.scan_target(conn, conns, t, values, result)
+                scanner.scan_target(conn, conns, t, values, result, progress=healthcheck.beat)
                 continue
             mine = {f for f in only if f.split("/", 1)[0] == t["login"]}
             mine |= {r["full_name"] for r in db.rows(
                 conn, "SELECT full_name FROM repos WHERE target_id = %s AND full_name = ANY(%s)",
                 (t["id"], list(only)))}
             if mine:
-                scanner.scan_target(conn, conns, t, values, result, only=mine)
+                scanner.scan_target(conn, conns, t, values, result, only=mine, progress=healthcheck.beat)
     queued = rules.handle_events(conn, result.events, values) if result.events else 0
     rate = result.rate
     db.execute(conn, """UPDATE scan_log SET finished_at = NOW(), repos = %s, prs = %s, branches = %s,
-                               events = %s, rate_remaining = %s, rate_limit = %s, error = %s WHERE id = %s""",
-               (result.repos, result.prs, result.branches, len(result.events),
+                               events = %s, skipped = %s, requests = %s, rate_remaining = %s, rate_limit = %s,
+                               error = %s WHERE id = %s""",
+               (result.repos, result.prs, result.branches, len(result.events), result.skipped, result.requests,
                 rate.remaining if rate else None, rate.limit if rate else None,
                 "; ".join(result.errors)[:2000] or None, log_id))
     conn.commit()
     level = logging.WARNING if result.errors else logging.INFO
-    log.log(level, "Scan (%s): %d repos, %d open PRs, %d branches, %d events, %d messages queued%s",
-            trigger, result.repos, result.prs, result.branches, len(result.events), queued,
+    log.log(level, "Scan (%s): %d repos (%d unchanged), %d open PRs, %d branches, %d events, %d messages queued, "
+            "%d GitHub requests%s",
+            trigger, result.repos, result.skipped, result.prs, result.branches, len(result.events), queued,
+            result.requests,
             f"; problems: {'; '.join(result.errors)}" if result.errors else "")
     return result
 
@@ -105,6 +109,7 @@ def take_requests(conn) -> tuple[bool, set, int]:
 
 
 def tick(state: dict, *, force_full: bool = False) -> None:
+    healthcheck.beat()
     now = datetime.now(timezone.utc)
     with db.get_conn() as conn:
         values = settings.load(conn)

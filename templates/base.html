@@ -72,6 +72,13 @@
     {% endif %}
   </div>
 </header>
+{% if worker_overdue %}
+<div class="flash warn worker-banner" role="alert">
+  <span><strong>Scans have stopped.</strong>
+  {% if worker_overdue.since %}No full scan has finished since {{ worker_overdue.since|ago }} ago{% else %}No full scan has finished yet{% endif %}, and one is due every {{ worker_overdue.interval }} minute{{ 's' if worker_overdue.interval != 1 }}.
+  Pull requests, reminders and messages are on hold until the worker runs again: check the worker container and its log.</span>
+</div>
+{% endif %}
 {% block body %}{% endblock %}
 <p class="app-foot"><a href="https://github.com/chrisnock-personal/branchwarden" rel="noopener">Branchwarden</a> v{{ version }}</p>
 {% endblock %}

@@ -154,3 +154,36 @@ def my_work(conn, login: str, values: dict, now: Optional[datetime] = None) -> d
     return {"to_review": to_review, "mine": mine, "branches": branches, "snoozed": snoozed,
             "needs_action": sum(1 for p in mine if p["next_step"]),
             "oldest_review": to_review[0]["asked_ago"] if to_review else None}
+
+
+# ─── Is the worker keeping up? ──────────────────────────────────────────────
+
+def scan_overdue(last_finished: Optional[datetime], running_since: Optional[datetime],
+                 first_user: Optional[datetime], interval_minutes: int, now: datetime) -> Optional[dict]:
+    """None while full scans keep coming, otherwise {"since", "interval"} for the
+    banner. Overdue means no full scan has finished for twice the interval and
+    none started in that time either (a long scan in progress isn't a fault; a
+    stuck one is). Before any scan has ever finished, it counts from the first
+    account being made, so a brand-new install doesn't warn straight away."""
+    limit = 2 * max(1, interval_minutes) * 60
+    since = last_finished or first_user
+    if since is None or (now - since).total_seconds() <= limit:
+        return None
+    if running_since and (now - running_since).total_seconds() <= limit:
+        return None
+    return {"since": last_finished, "interval": interval_minutes}
+
+
+def worker_overdue(conn, now: Optional[datetime] = None) -> Optional[dict]:
+    now = now or datetime.now(timezone.utc)
+    row = db.one(conn, """
+        SELECT (SELECT MAX(finished_at) FROM scan_log WHERE trigger IN ('schedule', 'manual')) AS finished,
+               (SELECT MAX(started_at) FROM scan_log WHERE trigger IN ('schedule', 'manual')
+                                                      AND finished_at IS NULL) AS running,
+               (SELECT MIN(created_at) FROM users) AS first_user,
+               (SELECT value FROM settings WHERE key = 'SCAN_INTERVAL_MINUTES') AS interval""")
+    try:
+        interval = int(row["interval"] or settings.DEFAULTS["SCAN_INTERVAL_MINUTES"][1])
+    except ValueError:
+        interval = 10
+    return scan_overdue(row["finished"], row["running"], row["first_user"], interval, now)
