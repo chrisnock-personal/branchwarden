@@ -60,6 +60,9 @@ setup code and create the first admin. Then, under **Settings › GitHub**:
 2. Add the organisations and accounts to scan.
 
 The first scan of each account records what's there without sending messages.
+It also imports the pull requests merged or closed in the last 180 days, so
+Metrics and MVP have numbers from the start (the daily trend charts and branch
+prunes can't be imported: they start when Branchwarden does).
 After that, scans pick up new PRs, reviews, merges and closes.
 
 ## How it fits together

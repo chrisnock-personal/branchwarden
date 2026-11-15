@@ -11,7 +11,7 @@ there, so adding an organisation doesn't flood the channels.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from psycopg2.extras import Json
@@ -81,6 +81,33 @@ query($owner: String!, $name: String!, $after: String) {{
   }}
   {RATE}
 }}"""
+
+
+# Merged and closed PRs, for the one-off import of a repo's history (no files or
+# labels: the metrics and MVP boards don't use them).
+HISTORY_FIELDS = """
+  number title url isDraft state createdAt updatedAt mergedAt closedAt
+  author { login } mergedBy { login }
+  headRefName headRefOid baseRefName reviewDecision additions deletions changedFiles
+  latestReviews(first: 30) { nodes { author { login } state submittedAt } }
+  firstReviews: reviews(first: 10, states: [APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED]) { nodes { submittedAt author { login } } }
+  timelineItems(last: 20, itemTypes: [READY_FOR_REVIEW_EVENT, REVIEW_REQUESTED_EVENT]) { nodes {
+    __typename ... on ReadyForReviewEvent { createdAt } ... on ReviewRequestedEvent { createdAt } } }
+"""
+
+ENDED_PRS = f"""
+query($owner: String!, $name: String!, $after: String) {{
+  repository(owner: $owner, name: $name) {{
+    pullRequests(states: [MERGED, CLOSED], first: 50, after: $after, orderBy: {{field: UPDATED_AT, direction: DESC}}) {{
+      pageInfo {{ hasNextPage endCursor }}
+      nodes {{ {HISTORY_FIELDS} }}
+    }}
+  }}
+  {RATE}
+}}"""
+
+HISTORY_DAYS = 180       # the longest Metrics period
+HISTORY_MAX = 3000       # PRs per repo, at most
 
 
 def _branches_query(compare: bool) -> str:
@@ -267,6 +294,60 @@ def fetch_ended(client: Client, owner: str, name: str, numbers: list[int]) -> di
     return out
 
 
+def fetch_history(client: Client, owner: str, name: str, since: datetime) -> list[dict]:
+    """PRs merged or closed since `since`, newest first. GitHub can't filter
+    PRs by date, so this reads them by last update and stops at the first page
+    that goes back past `since` (a PR updated before then ended before then)."""
+    out: list[dict] = []
+    after = None
+    while len(out) < HISTORY_MAX:
+        data = client.graphql(ENDED_PRS, {"owner": owner, "name": name, "after": after})
+        conn = (data.get("repository") or {}).get("pullRequests")
+        if conn is None:
+            raise GitHubError(f"{owner}/{name}: not found or no access")
+        older = False
+        for node in conn["nodes"]:
+            if not node:
+                continue
+            ended = analysis.parse_time(node.get("mergedAt") or node.get("closedAt"))
+            if ended and ended >= since:
+                out.append(pr_from_node(node))
+            if (analysis.parse_time(node.get("updatedAt")) or since) < since:
+                older = True
+        if older or not conn["pageInfo"]["hasNextPage"]:
+            return out
+        after = conn["pageInfo"]["endCursor"]
+    return out
+
+
+def import_history(conn, client: Client, repo: dict, values: dict, now: Optional[datetime] = None) -> int:
+    """Once per repo: store PRs merged or closed in the last HISTORY_DAYS, so
+    Metrics and MVP have numbers from the first day instead of filling in from
+    PRs seen open. PRs already stored are left as they are, and no messages go
+    out. Returns how many were added; on a GitHub error, it's tried again next scan."""
+    now = now or datetime.now(timezone.utc)
+    days = min(HISTORY_DAYS, max(30, settings.number(values, "RETAIN_PR_DAYS", 365)))
+    try:
+        prs = fetch_history(client, repo["owner"], repo["name"], now - timedelta(days=days))
+    except GitHubError as exc:
+        log.info("%s: history not imported yet: %s", repo["full_name"], exc)
+        return 0
+    added = 0
+    for pr in prs:
+        if pr["state"] == "open":
+            continue
+        values_ = [Json(pr[c]) if c in JSON_COLUMNS else pr[c] for c in PR_COLUMNS]
+        added += db.execute(conn, f"""
+            INSERT INTO pull_requests (repo_id, number, {', '.join(PR_COLUMNS)}, seen_at)
+            VALUES (%s, %s, {', '.join(['%s'] * len(PR_COLUMNS))}, NOW())
+            ON CONFLICT (repo_id, number) DO NOTHING""", [repo["id"], pr["number"], *values_])
+    db.execute(conn, "UPDATE repos SET history_at = NOW() WHERE id = %s", (repo["id"],))
+    if added:
+        log.info("%s: imported %d merged or closed pull request%s from the last %d days",
+                 repo["full_name"], added, "" if added == 1 else "s", days)
+    return added
+
+
 # ─── Storing ────────────────────────────────────────────────────────────────
 
 PR_COLUMNS = ("title", "url", "author", "state", "draft", "head_ref", "head_oid", "base_ref",
@@ -314,7 +395,7 @@ def _store_branches(conn, repo_id: int, branches: list[dict], full_name: str = "
                     (repo_id, [b["name"] for b in branches]))
 
 
-def scan_repo(conn, client: Client, repo: dict) -> tuple[list[dict], int, int]:
+def scan_repo(conn, client: Client, repo: dict, values: Optional[dict] = None) -> tuple[list[dict], int, int]:
     """Scan one repo; returns (events, open PRs, branches)."""
     owner, name = repo["owner"], repo["name"]
     first = not repo["scanned_once"]
@@ -356,6 +437,8 @@ def scan_repo(conn, client: Client, repo: dict) -> tuple[list[dict], int, int]:
                 events.append({"kind": state, "pr_id": before[n]["id"]})
 
     _store_branches(conn, repo["id"], branches, repo["full_name"], first)
+    if not repo.get("history_at"):
+        import_history(conn, client, repo, values or {})
     default_head = next((b["head_oid"] for b in branches if b["name"] == repo["default_branch"]), None)
     events += workflows.scan_repo(conn, client, repo, default_head)
     db.execute(conn, """UPDATE repos SET codeowners = %s, scanned_once = TRUE, last_scan_at = NOW(),
@@ -430,7 +513,7 @@ def scan_target(conn, conns: Connections, target: dict, values: dict, result: Sc
         if not repo["included"]:
             continue
         try:
-            events, n_prs, n_branches = scan_repo(conn, client, repo)
+            events, n_prs, n_branches = scan_repo(conn, client, repo, values)
             conn.commit()
             result.events.extend(events)
             result.repos += 1

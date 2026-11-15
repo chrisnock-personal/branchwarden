@@ -4,6 +4,17 @@ All notable changes to Branchwarden. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Merges, reviews and PRs raised showed 0 on a new install** (#20). A merge
+  only counted when a scan had first seen the PR open. Now each repo's first
+  scan also imports the PRs merged or closed in the last 180 days (or the
+  *Keep closed pull requests* period, if shorter), with who merged them and
+  their reviews, so Metrics and MVP have numbers from the start. Existing
+  installs import once on their next scan. No messages go out for them.
+
 ## [0.2.0] - 2026-11-15
 
 ### Added
