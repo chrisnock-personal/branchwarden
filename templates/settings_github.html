@@ -151,4 +151,19 @@
     <div class="actions"><span></span><div class="end"><button type="submit" class="btn primary">Save</button></div></div>
   </form>
 </section>
+
+<section class="card pad" id="prs" aria-labelledby="prs-h">
+  <h2 id="prs-h">Pull requests</h2>
+  <form method="post" action="{{ url_for('admin.github_prs') }}" style="display: flex; flex-direction: column; gap: 16px">
+    {{ csrf() }}
+    <div class="form-grid">
+      <div class="field"><label for="big-lines">A PR is big from (lines changed)</label><input class="input num" id="big-lines" name="BIG_PR_LINES" value="{{ get('BIG_PR_LINES') }}" inputmode="numeric"><span class="help">Lines added plus removed. 50 to 100000.</span></div>
+      <div class="field"><label for="big-files">or from (files changed)</label><input class="input num" id="big-files" name="BIG_PR_FILES" value="{{ get('BIG_PR_FILES') }}" inputmode="numeric"><span class="help">5 to 10000.</span></div>
+      <div class="field"><label for="stalled">A PR has stalled after (days)</label><input class="input num" id="stalled" name="STALLED_DAYS" value="{{ get('STALLED_DAYS') }}" inputmode="numeric"><span class="help">With no commits, reviews or comments. Drafts never stall. 1 to 365.</span></div>
+      <div class="field"><label for="tkt-url">Ticket link</label><input class="input mono" id="tkt-url" name="TICKET_URL" value="{{ get('TICKET_URL') }}" placeholder="https://company.atlassian.net/browse/{key}"><span class="help">With <span class="mono">{key}</span> where the ticket key goes: Jira's <span class="mono">…/browse/{key}</span>, Linear's <span class="mono">https://linear.app/team/issue/{key}</span>. Empty: tickets aren't linked.</span></div>
+      <div class="field"><label for="tkt-pat">Ticket key pattern</label><input class="input mono" id="tkt-pat" name="TICKET_PATTERN" value="{{ get('TICKET_PATTERN') }}"><span class="help">A regular expression, found in PR titles, branch names and descriptions. The default matches keys like ABC-123.</span></div>
+    </div>
+    <div class="actions"><span></span><div class="end"><button type="submit" class="btn primary">Save</button></div></div>
+  </form>
+</section>
 {% endblock %}

@@ -291,7 +291,7 @@ def test_workflows_template_renders():
     html = env.get_template("workflows.html").render(
         w=page, periods=wf.PERIODS, days=7, repo="", repos=[], show="all",
         shows=(("all", "All"),), outcomes=wf.OUTCOMES, rule_on={"wf_failed": True},
-        local=lambda x: x, request=Req, link=lambda **k: "?", url_for=lambda *a, **k: "/x",
+        local=lambda x: x, request=Req, link=lambda **k: "?", repo_link=lambda f: "/repos/" + f, url_for=lambda *a, **k: "/x",
         current_user={"role": "admin", "name": "A"}, csrf_token=lambda: "", get_flashed_messages=lambda **k: [],
         version="0", reviews_waiting=None, q="")
     assert "Nightly" in html and "st-missed" in html and "Failing since 2 days ago" in html

@@ -9,8 +9,17 @@
 organisation or account:
 - **Pull requests:** every open PR and what state it's in (draft, needs review,
   changes requested, approved, CI failing, conflicts), who it's waiting on, and for how long.
+  Big PRs (by lines or files) and stalled ones (no commits, reviews or comments
+  for a week) are flagged, and ticket keys like `ABC-123` in titles, branch
+  names and descriptions link to Jira, Linear or any tracker.
 - **Branches:** those with no PR that have gone stale, and those left behind by
   PRs that were merged or closed.
+- **Repositories:** every repo with its open PRs, branches to tidy, failing
+  workflows and the settings behind most branch and review problems (head
+  branches not deleted after merge, an unprotected default branch, merging
+  without an approval, no CODEOWNERS), each linked to where it's changed on
+  GitHub. A page per repo brings together its PRs, branches, metrics,
+  workflows, reviewers, CODEOWNERS rules and the channels it's routed to.
 - **Reviewers:** request reviewers from the dashboard, with suggestions drawn
   from CODEOWNERS and who has reviewed in that repo recently. An optional rule
   assigns one automatically when nobody has been asked: code owners first, then
@@ -24,8 +33,8 @@ organisation or account:
   ran, and whether its runs passed or failed. It flags workflows failing on the
   default branch, scheduled runs that never started, and scheduled workflows
   GitHub has switched off after 60 days without activity in the repo.
-- **Metrics:** time to first review, time to merge, merges per week, and daily
-  trends of PRs needing review and stale branches, per repo or overall.
+- **Metrics:** time to first review, time to merge, merges per week, both by
+  PR size, and daily trends of PRs needing review and stale branches, per repo or overall.
 - **MVP:** for the last 7 days (or the 7 before), who submitted the most
   reviews, merged the most PRs, deleted the most branches and opened the most
   PRs, with team totals. An optional weekly post sends the MVPs to Teams and Slack.
@@ -268,6 +277,9 @@ of all repos:
 **Retention:** closed PRs are kept for 365 days, for the metrics. Messages and
 scans are kept for 90 days. Both are set under *Settings › GitHub*, and older
 records are removed once an hour.
+
+**Reporting a vulnerability:** privately, through the repository's Security
+tab. See [SECURITY.md](SECURITY.md).
 
 **Not covered yet:** the Postgres volume itself isn't encrypted. Run it on an
 encrypted disk if PR titles and branch names are sensitive. Back up the `keys`

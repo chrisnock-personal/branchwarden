@@ -8,6 +8,27 @@ All notable changes to Branchwarden. The format follows
 
 ### Added
 
+- **Repositories** (#11, #17), a new *Repos* link:
+  - Every repo with its open PRs, branches to tidy, failing workflows and
+    health flags: head branches not deleted after merge, the default branch
+    not protected, merging without an approving review, no CODEOWNERS. Each
+    flag links to the setting on GitHub. Protection and rulesets are read
+    once a day; "no required reviews" is only flagged when GitHub shows it.
+  - A page per repo: its PRs, stale and left-behind branches, metrics,
+    workflows, who reviews there, CODEOWNERS rules and the channels it goes to.
+  - Repo names across the dashboard open it, and the overview's cards link
+    their status line to the repo's pull requests and their branch line to its
+    branches (#16).
+- **Big and stalled PRs** (#12): badges and filters for PRs over a size
+  (lines or files) and for PRs with no commits, reviews or comments for a
+  number of days, both set in *Settings › GitHub*. A "Stalled" reminder rule
+  (off until switched on), and Metrics by PR size.
+- **Ticket links** (#14): keys like `ABC-123` in PR titles, branch names and
+  descriptions link to your tracker (a URL template with `{key}`), on the
+  Pull requests and Branches pages and as buttons on messages, with a "No
+  ticket" filter. Only the keys are kept from descriptions.
+- **SECURITY.md** (#8), with GitHub's private vulnerability reporting switched on.
+
 - **Health checks** (#4): compose checks the dashboard (`/healthz`, which also
   checks the database) and the worker (a heartbeat it touches every few
   seconds and after each repo during a scan), with `healthcheck.py`.

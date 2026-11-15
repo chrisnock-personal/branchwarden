@@ -33,17 +33,17 @@
 
   <section aria-labelledby="repos-h">
     <div class="section-head">
-      <h2 id="repos-h">Repositories</h2>
-      {% if repo_total > cards|length %}<span style="font-size: 13px; color: var(--muted)">the {{ cards|length }} busiest of {{ repo_total }}</span>{% endif %}
+      <h2 id="repos-h"><a class="pr-title" href="{{ url_for('repos_page') }}">Repositories</a></h2>
+      <span style="font-size: 13px; color: var(--muted)">{% if repo_total > cards|length %}the {{ cards|length }} busiest of {{ repo_total }} · {% endif %}<a href="{{ url_for('repos_page') }}">All repositories and their health</a></span>
     </div>
     {% if cards %}
     <div class="repos">
       {% for r in cards %}
-        <a class="card repo" href="{{ url_for('pulls', repo=r.full_name) }}">
-          <strong>{{ r.name }}</strong>
-          <span class="status {{ r.tone }} dot">{{ r.status }}</span>
-          <span class="meta">{{ r.meta }}</span>
-        </a>
+        <div class="card repo">
+          <strong><a class="repo-main" href="{{ url_for('repo_page', owner=r.full_name.split('/')[0], name=r.full_name.split('/')[1]) }}">{{ r.name }}</a></strong>
+          <a class="repo-link status {{ r.tone }} dot" href="{{ url_for('pulls', repo=r.full_name) }}" aria-label="{{ r.name }}: {{ r.status }}, pull requests">{{ r.status }}</a>
+          <a class="repo-link meta" href="{{ url_for('branches', repo=r.full_name, tab='left' if r.left_only else None) }}" aria-label="{{ r.name }}: {{ r.meta }}, branches">{{ r.meta }}</a>
+        </div>
       {% endfor %}
     </div>
     {% else %}

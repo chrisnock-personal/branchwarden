@@ -18,7 +18,9 @@ from typing import Optional
 from psycopg2.extras import Json
 
 import analysis
+import data
 import db
+import repohealth
 import settings
 import workflows
 from github import Client, Connections, GitHubError
@@ -32,8 +34,9 @@ RATE = "rateLimit { remaining limit resetAt }"
 
 REPO_FIELDS = """
   pageInfo { hasNextPage endCursor }
-  nodes { name nameWithOwner url isArchived isFork isPrivate owner { login } defaultBranchRef { name }
-          pushedAt
+  nodes { name nameWithOwner url isArchived isFork isPrivate owner { login }
+          defaultBranchRef { name branchProtectionRule { requiresApprovingReviews requiredApprovingReviewCount } }
+          deleteBranchOnMerge pushedAt
           pullRequests(states: OPEN, first: 1, orderBy: {field: UPDATED_AT, direction: DESC}) {
             totalCount nodes { updatedAt } } }
 """
@@ -55,8 +58,9 @@ query($login: String!, $after: String) {{
 ONE_REPO = f"""
 query($owner: String!, $name: String!) {{
   repository(owner: $owner, name: $name) {{
-    name nameWithOwner url isArchived isFork isPrivate owner {{ login }} defaultBranchRef {{ name }}
-    pushedAt
+    name nameWithOwner url isArchived isFork isPrivate owner {{ login }}
+    defaultBranchRef {{ name branchProtectionRule {{ requiresApprovingReviews requiredApprovingReviewCount }} }}
+    deleteBranchOnMerge pushedAt
     pullRequests(states: OPEN, first: 1, orderBy: {{field: UPDATED_AT, direction: DESC}}) {{
       totalCount nodes {{ updatedAt }} }}
   }}
@@ -64,7 +68,7 @@ query($owner: String!, $name: String!) {{
 }}"""
 
 PR_FIELDS = """
-  number title url isDraft state createdAt updatedAt mergedAt closedAt
+  number title url isDraft state createdAt updatedAt mergedAt closedAt body
   author { login } mergedBy { login }
   headRefName headRefOid baseRefName reviewDecision mergeable additions deletions changedFiles
   labels(first: 20) { nodes { name } }
@@ -163,8 +167,9 @@ def first_review(node: dict) -> Optional[str]:
     return min(times) if times else None
 
 
-def pr_from_node(node: dict) -> dict:
-    """A PR as stored, from its GraphQL node."""
+def pr_from_node(node: dict, ticket_pattern: Optional[str] = None) -> dict:
+    """A PR as stored, from its GraphQL node. Only the ticket keys in its
+    description are kept (with ticket links on), never the text itself."""
     requested = []
     for rr in (node.get("reviewRequests") or {}).get("nodes") or []:
         who = (rr or {}).get("requestedReviewer") or {}
@@ -205,6 +210,7 @@ def pr_from_node(node: dict) -> dict:
         "merged_at": node.get("mergedAt"), "merged_by": _login(node.get("mergedBy")),
         "closed_at": node.get("closedAt"),
         "first_review_at": first_review(node),
+        "body_tickets": analysis.ticket_keys([node.get("body")], ticket_pattern) if ticket_pattern else [],
     }
 
 
@@ -257,7 +263,8 @@ def list_repos(client: Client, target: dict) -> list[dict]:
     return _pages(client, USER_REPOS, {"login": target["login"]}, ["user", "repositories"])
 
 
-def fetch_open_prs(client: Client, owner: str, name: str) -> tuple[list[dict], str]:
+def fetch_open_prs(client: Client, owner: str, name: str,
+                   ticket_pattern: Optional[str] = None) -> tuple[list[dict], str]:
     prs: list[dict] = []
     codeowners = ""
     after = None
@@ -272,7 +279,7 @@ def fetch_open_prs(client: Client, owner: str, name: str) -> tuple[list[dict], s
                     codeowners = repo[k]["text"]
                     break
         conn = repo["pullRequests"]
-        prs.extend(pr_from_node(n) for n in conn["nodes"] if n)
+        prs.extend(pr_from_node(n, ticket_pattern) for n in conn["nodes"] if n)
         if not conn["pageInfo"]["hasNextPage"]:
             return prs, codeowners
         after = conn["pageInfo"]["endCursor"]
@@ -363,8 +370,9 @@ def import_history(conn, client: Client, repo: dict, values: dict, now: Optional
 PR_COLUMNS = ("title", "url", "author", "state", "draft", "head_ref", "head_oid", "base_ref",
               "review_decision", "mergeable", "ci_state", "additions", "deletions", "changed_files",
               "files", "labels", "requested", "reviews", "created_at", "updated_at", "ready_at",
-              "review_requested_at", "last_commit_at", "merged_at", "merged_by", "closed_at", "first_review_at")
-JSON_COLUMNS = {"files", "labels", "requested", "reviews"}
+              "review_requested_at", "last_commit_at", "merged_at", "merged_by", "closed_at", "first_review_at",
+              "body_tickets")
+JSON_COLUMNS = {"files", "labels", "requested", "reviews", "body_tickets"}
 
 BRANCH_COLUMNS = ("head_oid", "last_commit_at", "last_committer", "protected", "ahead", "behind",
                   "pr_number", "pr_state", "pr_title", "pr_head_oid", "pr_merged_at", "pr_closed_at",
@@ -409,7 +417,8 @@ def scan_repo(conn, client: Client, repo: dict, values: Optional[dict] = None) -
     """Scan one repo; returns (events, open PRs, branches)."""
     owner, name = repo["owner"], repo["name"]
     first = not repo["scanned_once"]
-    prs, codeowners = fetch_open_prs(client, owner, name)
+    prefs = data.pr_prefs(values=values or {})
+    prs, codeowners = fetch_open_prs(client, owner, name, prefs.ticket_pattern if prefs.ticket_url else None)
     branches = fetch_branches(client, owner, name, repo["default_branch"])
 
     before = {r["number"]: r for r in db.rows(
@@ -449,6 +458,7 @@ def scan_repo(conn, client: Client, repo: dict, values: Optional[dict] = None) -
     _store_branches(conn, repo["id"], branches, repo["full_name"], first)
     if not repo.get("history_at"):
         import_history(conn, client, repo, values or {})
+    repohealth.refresh(conn, client, repo)
     default_head = next((b["head_oid"] for b in branches if b["name"] == repo["default_branch"]), None)
     events += workflows.scan_repo(conn, client, repo, default_head)
     db.execute(conn, """UPDATE repos SET codeowners = %s, scanned_once = TRUE, last_scan_at = NOW(),
@@ -485,15 +495,19 @@ def _store_repo(conn, target: dict, node: dict, values: dict) -> dict:
         with_archived=settings.flag(values, "INCLUDE_ARCHIVED"),
         with_forks=settings.flag(values, "INCLUDE_FORKS"))
     return db.one(conn, """
-        INSERT INTO repos (target_id, owner, name, full_name, url, default_branch, archived, fork, private, included)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO repos (target_id, owner, name, full_name, url, default_branch, archived, fork, private, included,
+                           delete_branch_on_merge, classic_protection)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (full_name) DO UPDATE SET target_id = EXCLUDED.target_id, owner = EXCLUDED.owner,
             name = EXCLUDED.name, url = EXCLUDED.url, default_branch = EXCLUDED.default_branch,
             archived = EXCLUDED.archived, fork = EXCLUDED.fork, private = EXCLUDED.private,
-            included = EXCLUDED.included
+            included = EXCLUDED.included,
+            delete_branch_on_merge = COALESCE(EXCLUDED.delete_branch_on_merge, repos.delete_branch_on_merge),
+            classic_protection = EXCLUDED.classic_protection
         RETURNING *""", (target["id"], node["owner"]["login"], node["name"], full, node["url"],
                          (node.get("defaultBranchRef") or {}).get("name"), node["isArchived"],
-                         node["isFork"], node["isPrivate"], included)) | {"new_sig": signature(node)}
+                         node["isFork"], node["isPrivate"], included, node.get("deleteBranchOnMerge"),
+                         Json((node.get("defaultBranchRef") or {}).get("branchProtectionRule")))) | {"new_sig": signature(node)}
 
 
 def _scan_one(client: Client, repo: dict, values: dict, skip: bool, workflows_too: bool) -> dict:

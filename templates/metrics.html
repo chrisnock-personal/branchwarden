@@ -1,22 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Metrics · Branchwarden{% endblock %}
-{% macro chart(title, sub, points, unit, id) %}
-<section class="card panel" aria-labelledby="{{ id }}-h">
-  <div class="panel-head"><div><h2 id="{{ id }}-h">{{ title }}</h2><p class="hint" style="margin-top: 2px">{{ sub }}</p></div></div>
-  <div class="poll-body">
-    {% if points and points|selectattr('value')|list %}
-    <div class="mbars" role="img" aria-label="{{ title }}: {{ points|length }} bars; the table below has the values">
-      {% for b in points %}<div class="col" title="{{ b.tip }}"><div class="fill" style="height: {{ b.height }}%"></div></div>{% endfor %}
-    </div>
-    <div class="poll-axis"><span>{{ points[0].label }}</span><span>{{ points[-1].label }}</span></div>
-    <details class="tableview"><summary>Show as a table</summary>
-      <table><thead><tr><th>When</th><th style="text-align: right">{{ unit }}</th></tr></thead>
-      <tbody>{% for b in points %}<tr><td class="sub">{{ b.label }}</td><td class="sub" style="text-align: right">{{ b.tip.split(': ', 1)[1] }}</td></tr>{% endfor %}</tbody></table>
-    </details>
-    {% else %}<div class="empty">Nothing yet for this period.</div>{% endif %}
-  </div>
-</section>
-{% endmacro %}
+{% from "_charts.html" import chart %}
 {% block body %}
 <main>
   <div class="page-head">
@@ -52,6 +36,17 @@
     {{ chart('Needing review', 'Open PRs waiting for a review, each day', m.review_bars, 'Needing review', 'nr') }}
     {{ chart('Stale branches', 'Branches with no PR and no recent commits, each day', m.stale_bars, 'Stale', 'sb') }}
   </div>
+
+  <section class="card panel" aria-labelledby="size-h">
+    <div class="panel-head"><h2 id="size-h">By size</h2><span class="hint">do bigger PRs wait longer? Last {{ days }} days</span></div>
+    <div class="scroll"><table style="min-width: 520px">
+      <thead><tr><th>Lines changed</th><th style="text-align: right">Reviewed</th><th style="text-align: right">First review</th><th style="text-align: right">Merged</th><th style="text-align: right">To merge</th></tr></thead>
+      <tbody>{% for b in m.by_size %}<tr>
+        <td>{{ b.band }}</td><td class="sub" style="text-align: right">{{ b.reviewed }}</td><td class="sub" style="text-align: right">{{ b.first }}</td>
+        <td class="sub" style="text-align: right">{{ b.merged }}</td><td class="sub" style="text-align: right">{{ b.merge }}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+  </section>
 
   <section class="health">
     <div class="card panel">

@@ -45,10 +45,13 @@
           {% for p in prs %}
             <tr class="{{ 'sel' if sel and sel.id == p.id }}">
               <td><a class="pr-title" href="{{ p.url }}" target="_blank" rel="noopener">{{ p.title }}</a>
-                <div class="pr-sub">{{ p.ref }}{% if p.labels %} · {{ p.labels|join(', ') }}{% endif %}</div>
-                <div class="pr-sub">{{ p.head_ref }} → {{ p.base_ref }}</div></td>
+                <div class="pr-sub"><a class="sub-link" href="{{ repo_link(p.full_name) }}">{{ p.repo_name }}</a> #{{ p.number }}{% if p.labels %} · {{ p.labels|join(', ') }}{% endif %}</div>
+                <div class="pr-sub">{{ p.head_ref }} → {{ p.base_ref }}</div>
+                {% if p.tickets %}<div class="tickets">{% for t in p.tickets %}<a class="ticket" href="{{ t.url }}" rel="noopener">{{ t.key }}</a>{% endfor %}</div>{% endif %}</td>
               <td class="nowrap sub">{{ p.author or '—' }}</td>
-              <td class="nowrap"><span class="badge {{ p.tone }}">{{ p.state_label }}</span></td>
+              <td class="nowrap"><span class="badge {{ p.tone }}">{{ p.state_label }}</span>
+                {% if p.big %}<div><span class="badge warn" title="{{ p.lines }} lines in {{ p.changed_files }} files">Big · {{ p.lines }} lines</span></div>{% endif %}
+                {% if p.stalled %}<div><span class="badge muted" title="No commits, reviews or comments since then">Stalled · {{ p.quiet }}</span></div>{% endif %}</td>
               <td class="nowrap"><span class="tone-{{ p.ci_tone }} dot" style="font-size: 13px; font-weight: 600">{{ p.ci_label }}</span></td>
               <td>{% include "_marks.html" %}</td>
               <td class="nowrap sub" title="Waiting on {{ p.waiting_on }}">{{ p.waiting }}<div class="pr-sub">on {{ p.waiting_on }}</div>{% if p.snooze %}<div class="pr-sub" title="Reminders snoozed by {{ p.snooze.by_name }}">snoozed to {{ p.snooze.until.strftime('%d %b') }}</div>{% endif %}</td>

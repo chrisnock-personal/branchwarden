@@ -60,7 +60,7 @@ STATES = {
 
 FILTERS = (("all", "All"), ("review", "Needs review"), ("changes", "Changes requested"),
            ("approved", "Approved"), ("ci", "CI failing"), ("conflicts", "Conflicts"),
-           ("draft", "Drafts"))
+           ("draft", "Drafts"), ("big", "Big"), ("stalled", "Stalled"), ("noticket", "No ticket"))
 
 CI_LABELS = {"SUCCESS": ("passing", "good"), "FAILURE": ("failing", "bad"), "ERROR": ("failing", "bad"),
              "PENDING": ("pending", "warn"), "EXPECTED": ("pending", "warn")}
@@ -105,9 +105,18 @@ def pr_state(pr: dict) -> str:
     return "awaiting"
 
 
-def pr_categories(pr: dict) -> set[str]:
+def pr_categories(pr: dict, prefs: Optional[PrPrefs] = None, now: Optional[datetime] = None,
+                  tickets: Optional[list] = None) -> set[str]:
     """Every filter a PR belongs to (a PR can be approved and failing CI)."""
     state = pr_state(pr)
+    extra = set()
+    if prefs:
+        if is_big(pr, prefs):
+            extra.add("big")
+        if now and is_stalled(pr, prefs, now):
+            extra.add("stalled")
+        if prefs.ticket_url and not tickets:
+            extra.add("noticket")
     cats = set()
     if state in ("awaiting", "no_reviewer", "in_review"):
         cats.add("review")
@@ -119,7 +128,79 @@ def pr_categories(pr: dict) -> set[str]:
         cats.add("approved")
     if pr.get("ci_state") in ("FAILURE", "ERROR"):
         cats.add("ci")
-    return cats
+    return cats | extra
+
+
+# ─── Size, activity and tickets ─────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class PrPrefs:
+    """The settings that shape how PRs are shown: when one is big or stalled,
+    and how ticket keys are found and linked."""
+    big_lines: int = 500
+    big_files: int = 30
+    stalled_days: int = 7
+    ticket_pattern: str = r"[A-Z][A-Z0-9]+-[0-9]+"
+    ticket_url: str = ""          # with {key}; empty: tickets aren't linked or looked for
+
+
+def pr_lines(pr: dict) -> int:
+    return int(pr.get("additions") or 0) + int(pr.get("deletions") or 0)
+
+
+def is_big(pr: dict, prefs: PrPrefs) -> bool:
+    return pr_lines(pr) >= prefs.big_lines or int(pr.get("changed_files") or 0) >= prefs.big_files
+
+
+def size_band(lines: int, prefs: PrPrefs) -> str:
+    """small (under 100 lines), medium, or large (from the big-PR limit)."""
+    if lines >= prefs.big_lines:
+        return "large"
+    return "small" if lines < min(100, prefs.big_lines) else "medium"
+
+
+def last_activity(pr: dict) -> datetime:
+    """The newest of: GitHub's last update (commits, reviews, comments, edits),
+    the last commit, and the last review."""
+    times = [parse_time(pr.get("updated_at")), parse_time(pr.get("last_commit_at")),
+             parse_time(pr.get("ready_at")), parse_time(pr["created_at"])]
+    times += [parse_time(r.get("at")) for r in pr.get("reviews") or []]
+    return max(t for t in times if t)
+
+
+def is_stalled(pr: dict, prefs: PrPrefs, now: datetime) -> bool:
+    return not pr.get("draft") and now - last_activity(pr) >= timedelta(days=prefs.stalled_days)
+
+
+_TICKET_RE: dict = {}
+
+
+def ticket_regex(pattern: str) -> Optional[re.Pattern]:
+    if pattern not in _TICKET_RE:
+        try:
+            _TICKET_RE[pattern] = re.compile(r"(?<![A-Za-z0-9])(" + pattern + r")(?![A-Za-z0-9])")
+        except re.error:
+            _TICKET_RE[pattern] = None
+    return _TICKET_RE[pattern]
+
+
+def ticket_keys(texts: Iterable[Optional[str]], pattern: str, limit: int = 5) -> list[str]:
+    """Ticket keys like ABC-123 in the texts, in order, each once."""
+    rx = ticket_regex(pattern)
+    out: list[str] = []
+    if not rx:
+        return out
+    for text in texts:
+        for m in rx.finditer(text or ""):
+            if m.group(1) not in out:
+                out.append(m.group(1))
+            if len(out) >= limit:
+                return out
+    return out
+
+
+def ticket_links(keys: Iterable[str], url_template: str) -> list[dict]:
+    return [{"key": k, "url": url_template.replace("{key}", k)} for k in keys] if url_template else []
 
 
 def state_since(pr: dict) -> datetime:

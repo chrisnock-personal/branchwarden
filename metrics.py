@@ -14,6 +14,8 @@ import statistics
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
+import analysis
+import data
 import db
 
 PERIODS = ((30, "30 days"), (90, "90 days"), (180, "180 days"))
@@ -58,7 +60,7 @@ def compute(conn, days: int, repo: str = "", now: Optional[datetime] = None) -> 
         params.append(repo)
     prs = db.rows(conn, f"""
         SELECT p.id, p.state, p.created_at, p.ready_at, p.first_review_at, p.merged_at, p.closed_at,
-               p.repo_id, r.name AS repo_name, r.full_name
+               p.additions, p.deletions, p.repo_id, r.name AS repo_name, r.full_name
           FROM pull_requests p JOIN repos r ON r.id = p.repo_id
          WHERE r.included AND (p.merged_at >= %s OR p.first_review_at >= %s) {where}""", params)
 
@@ -120,6 +122,19 @@ def compute(conn, days: int, repo: str = "", now: Optional[datetime] = None) -> 
                          "first": duration(_median(v["first"])), "merge": duration(_median(v["merge"]))}
                         for k, v in by_repo.items()), key=lambda r: (-r["merged"], r["name"]))
 
+    # Do big PRs wait longer? Medians by size band (lines added plus removed).
+    prefs = data.pr_prefs(conn)
+    band_names = {"small": "Small (under 100 lines)" if prefs.big_lines > 100 else "Small",
+                  "medium": f"Medium (100 to {prefs.big_lines - 1})", "large": f"Large ({prefs.big_lines}+, big)"}
+    bands = {k: {"first": [], "merge": []} for k in band_names}
+    for p, h in first:
+        bands[analysis.size_band(analysis.pr_lines(p), prefs)]["first"].append(h)
+    for p, h in merged:
+        bands[analysis.size_band(analysis.pr_lines(p), prefs)]["merge"].append(h)
+    by_size = [{"band": band_names[k], "reviewed": len(v["first"]), "merged": len(v["merge"]),
+                "first": duration(_median(v["first"])), "merge": duration(_median(v["merge"]))}
+               for k, v in bands.items() if prefs.big_lines > 100 or k != "medium"]
+
     reviewers = db.rows(conn, """
         SELECT x->>'user' AS login, COUNT(*) AS waiting,
                MIN(COALESCE(p.review_requested_at, p.ready_at, p.created_at)) AS oldest
@@ -130,6 +145,7 @@ def compute(conn, days: int, repo: str = "", now: Optional[datetime] = None) -> 
                         "WHERE assigned_at >= %s", (since,))
     return {"tiles": tiles, "merged_bars": merged_bars, "first_bars": first_bars, "stale_bars": stale_bars,
             "review_bars": review_bars, "repos": repo_rows, "reviewers": reviewers, "assignments": auto,
+            "by_size": by_size,
             "days": days, "has_data": bool(prs or daily)}
 
 

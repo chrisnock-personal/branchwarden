@@ -298,6 +298,15 @@ ALTER TABLE repos ADD COLUMN IF NOT EXISTS full_scan_at TIMESTAMPTZ;
 ALTER TABLE scan_log ADD COLUMN IF NOT EXISTS skipped INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE scan_log ADD COLUMN IF NOT EXISTS requests INTEGER;
 
+-- Repo health (see repohealth.py): settings behind branch and review problems.
+ALTER TABLE repos ADD COLUMN IF NOT EXISTS delete_branch_on_merge BOOLEAN;
+ALTER TABLE repos ADD COLUMN IF NOT EXISTS classic_protection JSONB;   -- the default branch's rule, as GraphQL shows it
+ALTER TABLE repos ADD COLUMN IF NOT EXISTS health JSONB;               -- {protected, reviews, rules}
+ALTER TABLE repos ADD COLUMN IF NOT EXISTS health_at TIMESTAMPTZ;
+
+-- Ticket keys found in a PR's description (the text itself isn't kept).
+ALTER TABLE pull_requests ADD COLUMN IF NOT EXISTS body_tickets JSONB NOT NULL DEFAULT '[]';
+
 -- GitHub Actions workflows (see workflows.py).
 ALTER TABLE repos ADD COLUMN IF NOT EXISTS workflows_scanned BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE repos ADD COLUMN IF NOT EXISTS workflows_oid TEXT;       -- default branch head when the files were read

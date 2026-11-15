@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% from "_charts.html" import chart %}
+{% block title %}{{ r.name }} · Branchwarden{% endblock %}
+{% block body %}
+<main>
+  <div class="page-head">
+    <div>
+      <p class="crumbs"><a href="{{ url_for('repos_page') }}">Repositories</a> ›</p>
+      <h1 class="mono repo-h1">{{ r.name }}</h1>
+      <p>{{ r.full_name }}{% if r.private %} · private{% endif %} · default branch <span class="mono">{{ r.default_branch or '—' }}</span>
+        {% if r.url %} · <a href="{{ r.url }}" rel="noopener">Open on GitHub</a>{% endif %}</p>
+    </div>
+    <div class="seg" role="group" aria-label="Metrics period">
+      {% for dd, label in periods %}<a class="{{ 'on' if days == dd }}" href="{{ link(days=dd) }}" {% if days == dd %}aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}
+    </div>
+  </div>
+
+  <section class="kpis" aria-label="Summary">
+    {% for t in d.tiles %}
+    <div class="card kpi"><div class="label">{{ t.label }}</div><div class="row"><span class="value {{ t.tone }}">{{ t.value }}</span></div><span class="note">{{ t.note }}</span></div>
+    {% endfor %}
+    {% for t in [d.metrics.tiles[0], d.metrics.tiles[2]] %}
+    <div class="card kpi"><div class="label">{{ t.label }}</div><div class="row"><span class="value">{{ t.value }}</span></div><span class="note">{{ t.note }}, {{ days }} days</span></div>
+    {% endfor %}
+  </section>
+
+  <section class="card panel" aria-labelledby="health-h">
+    <div class="panel-head"><h2 id="health-h">Repository health</h2><span class="hint">read from GitHub's settings; change them there</span></div>
+    {% if d.flags %}
+    <ul class="flag-rows">
+      {% for f in d.flags %}<li><div><strong>{{ f.title }}</strong><span class="hint">{{ f.why }}</span></div><a class="btn small" href="{{ f.link }}" rel="noopener">Fix on GitHub</a></li>{% endfor %}
+    </ul>
+    {% else %}<div class="empty">{{ 'Nothing to flag.' if d.health_read else "Nothing flagged so far. Branch protection is read on the next full scan." }}</div>{% endif %}
+  </section>
+
+  <section class="card panel" aria-labelledby="prs-h">
+    <div class="panel-head"><h2 id="prs-h">Open pull requests</h2><a class="hint" href="{{ url_for('pulls', repo=r.full_name) }}">On the Pull requests page</a></div>
+    {% if d.prs %}
+    <div class="scroll"><table style="min-width: 640px">
+      <thead><tr><th>Pull request</th><th>State</th><th>Waiting on</th><th style="text-align: right">For</th></tr></thead>
+      <tbody>{% for p in d.prs %}<tr>
+        <td><a class="pr-title" href="{{ url_for('pulls', repo=r.full_name, assign=p.id) }}">#{{ p.number }} {{ p.title }}</a><div class="hint">{{ p.author or '' }} · <span class="mono">{{ p.head_ref }}</span></div></td>
+        <td><span class="badge {{ p.tone }}">{{ p.state_label }}</span>{% if 'ci' in p.cats %} <span class="badge bad">CI failing</span>{% endif %}</td>
+        <td class="sub">{{ p.waiting_on }}</td>
+        <td class="sub nowrap" style="text-align: right">{{ p.waiting }}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    {% else %}<div class="empty">No open pull requests.</div>{% endif %}
+  </section>
+
+  <section class="health">
+    <div class="card panel">
+      <div class="panel-head"><h2>Stale branches</h2><a class="hint" href="{{ url_for('branches', repo=r.full_name) }}">On Branches</a></div>
+      {% if d.stale %}<table><tbody>{% for b in d.stale[:8] %}<tr>
+        <td class="mono" style="font-size: 13px">{% if b.url %}<a class="pr-title" href="{{ b.url }}" rel="noopener">{{ b.name }}</a>{% else %}{{ b.name }}{% endif %}<div class="hint">{{ b.last_committer or '' }}</div></td>
+        <td style="text-align: right"><span class="badge {{ b.tone }}">{{ b.status_label }}</span></td>
+      </tr>{% endfor %}</tbody></table>
+      {% if d.stale|length > 8 %}<p class="hint pad-x">and {{ d.stale|length - 8 }} more</p>{% endif %}
+      {% else %}<div class="empty">None.</div>{% endif %}
+    </div>
+    <div class="card panel">
+      <div class="panel-head"><h2>Left after a PR</h2><a class="hint" href="{{ url_for('branches', repo=r.full_name, tab='left') }}">On Branches</a></div>
+      {% if d.left %}<table><tbody>{% for b in d.left[:8] %}<tr>
+        <td class="mono" style="font-size: 13px">{% if b.url %}<a class="pr-title" href="{{ b.url }}" rel="noopener">{{ b.name }}</a>{% else %}{{ b.name }}{% endif %}<div class="hint">#{{ b.pr_number }}</div></td>
+        <td style="text-align: right"><span class="badge {{ b.tone }}">{{ b.status_label }}</span></td>
+      </tr>{% endfor %}</tbody></table>
+      {% if d.left|length > 8 %}<p class="hint pad-x">and {{ d.left|length - 8 }} more</p>{% endif %}
+      {% else %}<div class="empty">None.{% if not r.delete_branch_on_merge and r.delete_branch_on_merge is not none %} Turning on automatic deletion keeps it that way.{% endif %}</div>{% endif %}
+    </div>
+  </section>
+
+  <div class="charts">
+    {{ chart('Merged per week', 'Pull requests merged each week, last ' ~ days ~ ' days', d.metrics.merged_bars, 'Merged', 'mw') }}
+    {{ chart('Time to first review', 'Median per week, by when the review came', d.metrics.first_bars, 'Median', 'fr') }}
+  </div>
+
+  <section class="health">
+    <div class="card panel">
+      <div class="panel-head"><h2>Who reviews here</h2><span class="hint">last 90 days</span></div>
+      {% if d.reviewers %}<table>
+        <thead><tr><th>Reviewer</th><th style="text-align: right">PRs reviewed</th><th style="text-align: right">Waiting on them now</th></tr></thead>
+        <tbody>{% for x in d.reviewers %}<tr><td class="mono" style="font-size: 13px">{{ x.login }}</td><td class="sub" style="text-align: right">{{ x.reviewed }}</td><td class="sub" style="text-align: right">{{ x.waiting }}</td></tr>{% endfor %}</tbody>
+      </table>{% else %}<div class="empty">No reviews yet.</div>{% endif %}
+    </div>
+    <div class="card panel">
+      <div class="panel-head"><h2>CODEOWNERS</h2><span class="hint">the last matching rule wins</span></div>
+      {% if d.codeowners %}<table>
+        <thead><tr><th>Pattern</th><th>Owners</th></tr></thead>
+        <tbody>{% for c in d.codeowners %}<tr><td class="mono" style="font-size: 13px">{{ c.pattern }}</td><td class="sub">{{ c.owners|join(', ') or '(none)' }}</td></tr>{% endfor %}</tbody>
+      </table>{% else %}<div class="empty">No CODEOWNERS file.</div>{% endif %}
+    </div>
+  </section>
+
+  <section class="health">
+    <div class="card panel">
+      <div class="panel-head"><h2>Workflows</h2><a class="hint" href="{{ url_for('workflows_page', repo=r.full_name) }}">On Workflows</a></div>
+      {% if d.workflows.rows %}<table><tbody>{% for w in d.workflows.rows %}<tr>
+        <td><a class="pr-title" href="{{ url_for('workflows_page', repo=r.full_name, open=w.id) }}#wf-{{ w.id }}">{{ w.name }}</a><div class="hint">{{ w.triggers[:3]|join(', ') }}</div></td>
+        <td style="text-align: right">{% if w.failing_since %}<span class="badge bad">Failing</span>{% elif w.missed %}<span class="badge warn">{{ w.missed|length }} missed</span>{% elif w.state != 'active' %}<span class="badge muted">Switched off</span>{% elif w.pass_rate is not none %}<span class="badge good">{{ w.pass_rate }}% passed</span>{% else %}<span class="badge muted">No runs</span>{% endif %}</td>
+      </tr>{% endfor %}</tbody></table>{% else %}<div class="empty">No workflows.</div>{% endif %}
+    </div>
+    <div class="card panel">
+      <div class="panel-head"><h2>Messages go to</h2>{% if current_user.role == 'admin' %}<a class="hint" href="{{ url_for('admin.notifications') }}">Channels</a>{% endif %}</div>
+      {% if d.routing %}<table><tbody>{% for c in d.routing %}<tr>
+        <td>{{ c.kind }} · {{ c.name }}{% if not c.enabled %} <span class="badge muted">Off</span>{% endif %}</td><td class="sub">{{ c.how }}</td>
+      </tr>{% endfor %}</tbody></table>{% else %}<div class="empty">No channel gets this repo's messages.</div>{% endif %}
+    </div>
+  </section>
+</main>
+{% endblock %}

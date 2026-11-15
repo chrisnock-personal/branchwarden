@@ -37,6 +37,8 @@ import db  # noqa: E402
 import metrics  # noqa: E402
 import mvp  # noqa: E402
 import notify  # noqa: E402
+import repohealth  # noqa: E402
+import repos as repos_mod  # noqa: E402
 import rules  # noqa: E402
 from version import VERSION  # noqa: E402
 import settings  # noqa: E402
@@ -143,6 +145,14 @@ def _link(**changes) -> str:
 app.jinja_env.globals["link"] = _link
 
 
+def _repo_link(full_name: str) -> str:
+    owner, _, name = (full_name or "").partition("/")
+    return url_for("repo_page", owner=owner, name=name) if owner and name else "#"
+
+
+app.jinja_env.globals["repo_link"] = _repo_link
+
+
 ERRORS = {400: ("Something was wrong with that request", None), 403: ("Not allowed",
           "Your role can't do that. Ask an admin."), 404: ("Not found", "That page or item doesn't exist (any more)."),
           405: ("Not allowed", "That page can't be used like that.")}
@@ -239,7 +249,7 @@ def index():
         else:
             status, tone = f"{len(mine)} open · all in hand", "tone-good"
         cards.append({"id": r["id"], "name": r["name"], "full_name": r["full_name"], "status": status,
-                      "tone": tone, "open": len(mine),
+                      "tone": tone, "open": len(mine), "left_only": bool(rl) and not rs,
                       "meta": f"{len(rs)} stale branch{'es' if len(rs) != 1 else ''} · {len(rl)} left after a PR"})
     cards.sort(key=lambda c: (-c["open"], c["name"]))
 
@@ -374,8 +384,10 @@ def pulls():
     if q:
         shown = [p for p in shown if q in p["title"].lower() or q in p["full_name"] or q in (p["author"] or "")
                  or q in (p["head_ref"] or "").lower() or str(p["number"]) == q.lstrip("#")]
+    prefs = data.pr_prefs(values=values)
     chips = [{"key": k, "label": label,
-              "count": len(shown) if k == "all" else sum(1 for p in shown if k in p["cats"])} for k, label in analysis.FILTERS]
+              "count": len(shown) if k == "all" else sum(1 for p in shown if k in p["cats"])}
+             for k, label in analysis.FILTERS if k != "noticket" or prefs.ticket_url]
     if f != "all":
         shown = [p for p in shown if f in p["cats"]]
     key = {"newest": lambda p: p["created_at"], "updated": lambda p: p["updated_at"] or p["created_at"]}.get(sort)
@@ -490,6 +502,30 @@ def metrics_page():
         m = metrics.compute(conn, days, repo)
         repos = db.rows(conn, "SELECT full_name, name FROM repos WHERE included ORDER BY name")
     return render_template("metrics.html", m=m, periods=metrics.PERIODS, days=days, repo=repo, repos=repos)
+
+
+# ─── Repositories ───────────────────────────────────────────────────────────
+
+@app.get("/repos")
+def repos_page():
+    with db.get_conn() as conn:
+        values = settings.load(conn)
+        rows = repos_mod.overview(conn, values)
+    flagged = {k: sum(1 for r in rows if any(f["key"] == k for f in r["flags"])) for k in repohealth.FLAGS}
+    return render_template("repos.html", rows=rows, flagged=flagged, flag_names=repohealth.FLAGS)
+
+
+@app.get("/repos/<owner>/<name>")
+def repo_page(owner: str, name: str):
+    days = request.args.get("days", type=int)
+    days = days if days in dict(metrics.PERIODS) else 90
+    with db.get_conn() as conn:
+        values = settings.load(conn)
+        d = repos_mod.detail(conn, values, f"{owner}/{name}", days)
+    if not d:
+        abort(404)
+    return render_template("repo.html", d=d, r=d["repo"], days=days, periods=metrics.PERIODS,
+                           outcomes=workflows.OUTCOMES)
 
 
 # ─── Workflows ──────────────────────────────────────────────────────────────

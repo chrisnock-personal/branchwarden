@@ -1,0 +1,18 @@
+{# Bar charts, shared by Metrics and the repo pages. #}
+{% macro chart(title, sub, points, unit, id) %}
+<section class="card panel" aria-labelledby="{{ id }}-h">
+  <div class="panel-head"><div><h2 id="{{ id }}-h">{{ title }}</h2><p class="hint" style="margin-top: 2px">{{ sub }}</p></div></div>
+  <div class="poll-body">
+    {% if points and points|selectattr('value')|list %}
+    <div class="mbars" role="img" aria-label="{{ title }}: {{ points|length }} bars; the table below has the values">
+      {% for b in points %}<div class="col" title="{{ b.tip }}"><div class="fill" style="height: {{ b.height }}%"></div></div>{% endfor %}
+    </div>
+    <div class="poll-axis"><span>{{ points[0].label }}</span><span>{{ points[-1].label }}</span></div>
+    <details class="tableview"><summary>Show as a table</summary>
+      <table><thead><tr><th>When</th><th style="text-align: right">{{ unit }}</th></tr></thead>
+      <tbody>{% for b in points %}<tr><td class="sub">{{ b.label }}</td><td class="sub" style="text-align: right">{{ b.tip.split(': ', 1)[1] }}</td></tr>{% endfor %}</tbody></table>
+    </details>
+    {% else %}<div class="empty">Nothing yet for this period.</div>{% endif %}
+  </div>
+</section>
+{% endmacro %}

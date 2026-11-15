@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Repositories · Branchwarden{% endblock %}
+{% block body %}
+<main>
+  <div class="page-head">
+    <div>
+      <h1>Repositories</h1>
+      <p>Every repository Branchwarden watches: what's open, what to tidy, and the settings behind most branch and review problems.</p>
+    </div>
+  </div>
+
+  <section class="kpis" aria-label="Health across all repositories">
+    {% for key, (title, why) in flag_names.items() %}
+    <div class="card kpi" title="{{ why }}"><div class="label">{{ title }}</div><div class="row"><span class="value {{ 'tone-warn' if flagged[key] }}">{{ flagged[key] }}</span></div>
+      <span class="note">of {{ rows|length }} repositor{{ 'y' if rows|length == 1 else 'ies' }}</span></div>
+    {% endfor %}
+  </section>
+
+  <section class="card panel" aria-labelledby="list-h">
+    <div class="panel-head"><h2 id="list-h">{{ rows|length }} repositor{{ 'y' if rows|length == 1 else 'ies' }}</h2><span class="hint">those with something to look at first</span></div>
+    {% if rows %}
+    <div class="scroll"><table style="min-width: 860px">
+      <thead><tr><th>Repository</th><th style="text-align: right">Open PRs</th><th style="text-align: right">Need review</th><th style="text-align: right">Stale</th><th style="text-align: right">Left after a PR</th><th style="text-align: right">Workflows failing</th><th>Health</th></tr></thead>
+      <tbody>{% for r in rows %}<tr>
+        <td><a class="pr-title mono" href="{{ url_for('repo_page', owner=r.full_name.split('/')[0], name=r.full_name.split('/')[1]) }}">{{ r.name }}</a>
+          {% if r.private %}<div><span class="badge muted">Private</span></div>{% endif %}
+          {% if r.error %}<div class="hint warn">Last scan: {{ r.error }}</div>{% endif %}</td>
+        <td class="sub" style="text-align: right">{% if r.open %}<a href="{{ url_for('pulls', repo=r.full_name) }}">{{ r.open }}</a>{% else %}0{% endif %}{% if r.ci %} <span class="tone-bad" title="CI failing">· {{ r.ci }} CI</span>{% endif %}</td>
+        <td class="sub" style="text-align: right">{{ r.review }}</td>
+        <td class="sub" style="text-align: right">{% if r.stale %}<a href="{{ url_for('branches', repo=r.full_name) }}">{{ r.stale }}</a>{% else %}0{% endif %}</td>
+        <td class="sub" style="text-align: right">{% if r.left %}<a href="{{ url_for('branches', repo=r.full_name, tab='left') }}">{{ r.left }}</a>{% else %}0{% endif %}</td>
+        <td class="sub" style="text-align: right">{% if r.failing %}<a class="tone-bad" href="{{ url_for('workflows_page', repo=r.full_name, show='problems') }}">{{ r.failing }}</a>{% else %}0{% endif %}</td>
+        <td><div class="flag-list">{% for f in r.flags %}<a class="badge warn" href="{{ f.link }}" rel="noopener" title="{{ f.why }}">{{ f.title }}</a>{% else %}<span class="badge good">Nothing to flag</span>{% endfor %}</div></td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    {% else %}<div class="empty">No repositories scanned yet.</div>{% endif %}
+  </section>
+
+  <p class="hint">Branchwarden only reads these settings; each flag links to where it's changed on GitHub. Branch protection and rulesets are read once a day.</p>
+</main>
+{% endblock %}

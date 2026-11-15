@@ -73,7 +73,7 @@
   {% for g in w.groups %}
   <section class="card panel" aria-labelledby="repo-{{ g.repo_id }}">
     <div class="panel-head">
-      <h2 id="repo-{{ g.repo_id }}">{% if g.repo_url %}<a class="pr-title" href="{{ g.repo_url }}/actions" rel="noopener">{{ g.repo }}</a>{% else %}{{ g.repo }}{% endif %}</h2>
+      <h2 id="repo-{{ g.repo_id }}"><a class="pr-title" href="{{ repo_link(g.full_name) }}">{{ g.repo }}</a>{% if g.repo_url %} <a class="hint" href="{{ g.repo_url }}/actions" rel="noopener">Actions on GitHub</a>{% endif %}</h2>
       <span class="hint">{{ g.rows|length }} workflow{{ 's' if g.rows|length != 1 }}{% if g.problems %} · <span class="tone-warn">{{ g.problems }} need{{ 's' if g.problems == 1 }} attention</span>{% endif %}</span>
     </div>
     <div class="wf-axis" style="--days: {{ w.days|length }}" aria-hidden="true">

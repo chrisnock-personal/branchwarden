@@ -405,6 +405,34 @@ def github_test():
     return redirect(url_for("admin.github"))
 
 
+@bp.post("/settings/github/prs")
+def github_prs():
+    form = request.form
+    back = redirect(url_for("admin.github") + "#prs")
+    limits = {"BIG_PR_LINES": (50, 100000), "BIG_PR_FILES": (5, 10000), "STALLED_DAYS": (1, 365)}
+    changes = {}
+    for key, (lo, hi) in limits.items():
+        v = form.get(key, "").strip()
+        if not v.isdigit() or not lo <= int(v) <= hi:
+            flash(f"{settings.label(key)}: a whole number from {lo} to {hi}.", "bad")
+            return back
+        changes[key] = v
+    pattern = form.get("TICKET_PATTERN", "").strip() or settings.DEFAULTS["TICKET_PATTERN"][1]
+    if len(pattern) > 100 or analysis.ticket_regex(pattern) is None:
+        flash("The ticket key pattern isn't a regular expression Branchwarden can use (100 characters at most).", "bad")
+        return back
+    url = form.get("TICKET_URL", "").strip()
+    if url and (urlsplit(url).scheme != "https" or "{key}" not in url):
+        flash("The ticket link must start with https:// and contain {key}.", "bad")
+        return back
+    changes.update(TICKET_PATTERN=pattern, TICKET_URL=url)
+    with db.get_conn() as conn:
+        lines = settings.save(conn, changes, _actor())
+    flash("Saved. " + ("; ".join(lines) if lines else "Nothing changed.")
+          + (" Ticket keys in descriptions are picked up as each repo is next read in full." if url else ""), "ok")
+    return back
+
+
 @bp.post("/settings/github/scan")
 def github_scan():
     form = request.form

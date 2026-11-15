@@ -58,6 +58,8 @@ RULES = (
          {**REMINDER_DEFAULTS, "after": 3, "unit": "days", "repeat": 2, "max": 2}),
     Rule("approved", "reminder", "Approved, not merged",
          {**REMINDER_DEFAULTS, "after": 2, "unit": "days", "repeat": 1, "max": 2}, enabled=False),
+    Rule("stalled", "reminder", "Stalled: no activity",
+         {**REMINDER_DEFAULTS, "after": 7, "unit": "days", "repeat": 7, "max": 2}, enabled=False),
     Rule("digest", "digest", "Weekly stale-branch digest",
          {"day": "mon", "time": "09:00", "target": "all", "mention": True, "limit": 10}),
     Rule("mvp", "post", "Weekly MVP post",
@@ -115,7 +117,8 @@ def describe(rule: dict, channel_names: dict[int, str]) -> str:
     if rule["kind"] == "digest":
         return f"{p['day'].capitalize()}days at {p['time']}: stale branches and branches left after a PR, per repo"
     who = {"no_reviewer": "nudges the channel", "waiting": "reminds the requested reviewers",
-           "changes": "reminds the author", "approved": "reminds the author to merge or close"}[rule["key"]]
+           "changes": "reminds the author", "approved": "reminds the author to merge or close",
+           "stalled": "reminds the author (no commits, reviews or comments in that time)"}[rule["key"]]
     return (f"After {_amount(p['after'], p['unit'])}: {who}, then every {_amount(p['repeat'], p['unit'])}, "
             f"up to {p['max']} time{'s' if int(p['max']) != 1 else ''}")
 
@@ -159,6 +162,7 @@ def _facts(pr: dict) -> list:
 
 def _buttons(pr: dict, values: dict, snooze: bool = False) -> list:
     buttons = [["Open pull request", pr["url"]], ["Open in Branchwarden", _link(values, f"/pulls?assign={pr['id']}")]]
+    buttons += [[t["key"], t["url"]] for t in (pr.get("tickets") or [])[:2]]
     if snooze:
         buttons.append(["Snooze", _link(values, f"/pulls?assign={pr['id']}#snooze")])
     return buttons
@@ -173,7 +177,7 @@ def _pr_for_event(conn, pr_id: int, now: datetime) -> Optional[dict]:
         SELECT p.*, r.full_name, r.name AS repo_name, r.owner AS repo_owner, r.url AS repo_url,
                r.default_branch, r.codeowners
           FROM pull_requests p JOIN repos r ON r.id = p.repo_id WHERE p.id = %s""", (pr_id,))
-    return data.enrich_pr(pr, now) if pr else None
+    return data.enrich_pr(pr, now, data.pr_prefs(conn)) if pr else None
 
 
 def event_message(conn, event: dict, pr: dict, params: dict, values: dict) -> Optional[dict]:
@@ -210,7 +214,7 @@ def event_message(conn, event: dict, pr: dict, params: dict, values: dict) -> Op
         if left and pr["head_ref"] != pr.get("default_branch"):
             msg["text"] = (f"The branch `{pr['head_ref']}` is still there: flagged as "
                            f"{'left after merge' if merged else 'closed, unmerged'}.")
-        msg["buttons"] = [["Open pull request", pr["url"]]]
+        msg["buttons"] = [["Open pull request", pr["url"]]] + [[t["key"], t["url"]] for t in (pr.get("tickets") or [])[:2]]
         return msg
     return None
 
@@ -355,6 +359,9 @@ def reminder_since(key: str, pr: dict) -> Optional[datetime]:
         return since if last is None or last <= since else None
     if key == "approved":
         return since if state == "approved" else None
+    if key == "stalled":
+        # Counted from the last commit, review, comment or edit: any activity starts it again.
+        return pr.get("active_at") or analysis.last_activity(pr)
     return None
 
 
@@ -369,6 +376,10 @@ def reminder_line(key: str, pr: dict, mention: bool) -> tuple[str, str]:
         return f"Waiting for review · {waited}", f"{who}: this is waiting for your review."
     if key == "no_reviewer":
         return f"No reviewer · {waited}", "Nobody has been asked to review this yet."
+    if key == "stalled":
+        quiet = pr.get("quiet") or waited
+        return (f"Stalled · {quiet}", f"{author}, nothing has happened here for {quiet}: no commits, reviews or "
+                                      "comments. Move it on, ask for what it needs, or close it.")
     if key == "changes":
         reviewer = (analysis.latest_review(pr, "CHANGES_REQUESTED") or {}).get("login", "a reviewer")
         return (f"Changes requested · {waited}",
@@ -607,7 +618,7 @@ def run_auto_assign(conn, values: dict, now: Optional[datetime] = None, connecti
         db.request_scan(conn, pr["full_name"], "reviewers auto-assigned")
         mention = p.get("mention", True)
         who = "; ".join(f"{'@{' + c + '}' if mention else c} ({why})" for c, why in chosen)
-        pr = data.enrich_pr({**pr, "requested": requested}, now)
+        pr = data.enrich_pr({**pr, "requested": requested}, now, data.pr_prefs(conn))
         msg = {"heading": "Reviewer assigned", "tone": "info", "title": pr["title"], "title_url": pr["url"],
                "facts": _facts(pr), "text": f"Branchwarden asked {who} to review this.",
                "buttons": _buttons(pr, values), "pr": pr["ref"]}
