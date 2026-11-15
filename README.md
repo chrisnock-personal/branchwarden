@@ -359,7 +359,9 @@ deploy/restore.sh -i branchwarden-backup.key /backups/branchwarden-20261115-0200
 
 It puts back `.env` if there isn't one, the volumes and the database, then
 starts Branchwarden. It won't replace a database that already has data unless
-you add `--force`, and it checks that before stopping anything.
+you add `--force`, and it checks that before stopping anything. Volumes it
+has to create aren't labelled as compose's, so a later `down -v` leaves them:
+remove them with `podman volume rm` when you mean to.
 
 - **Other setups:** `ENGINE=docker COMPOSE="docker compose"` for Docker; for
   the quadlets, `--db-container branchwarden-db` and, when restoring,
