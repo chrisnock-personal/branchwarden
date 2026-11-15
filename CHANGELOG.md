@@ -4,7 +4,7 @@ All notable changes to Branchwarden. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.4.0] - 2026-11-15
 
 ### Added
 
@@ -19,6 +19,13 @@ All notable changes to Branchwarden. The format follows
   queue's retries and failures, workflows, skipping unchanged repos, the demo
   data and every page; and a Playwright run through setup and every section.
   CI runs them on every push.
+- **CI in the README:** a status badge, links to the latest release and the
+  image, and a "CI and releases" section saying what each workflow runs.
+
+### Changed
+
+- **Releases check CI:** the release workflow refuses a tag whose commit
+  hasn't passed CI.
 
 ## [0.3.0] - 2026-11-15
 

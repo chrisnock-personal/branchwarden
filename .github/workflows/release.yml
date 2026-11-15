@@ -10,6 +10,7 @@ on:
 permissions:
   contents: read
   packages: write
+  actions: read          # to check CI passed on the tagged commit
 
 jobs:
   image:
@@ -22,6 +23,17 @@ jobs:
           want="v$(python3 -c 'import version; print(version.VERSION)')"
           if [ "$want" != "$GITHUB_REF_NAME" ]; then
             echo "::error::Tag $GITHUB_REF_NAME, but version.py says $want"
+            exit 1
+          fi
+
+      - name: CI passed on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          passed=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" \
+                     --json conclusion -q '[.[] | select(.conclusion == "success")] | length')
+          if [ "${passed:-0}" -lt 1 ]; then
+            echo "::error::CI hasn't passed on $GITHUB_SHA: push the commit, wait for CI, then tag it"
             exit 1
           fi
 

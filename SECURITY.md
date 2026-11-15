@@ -43,7 +43,9 @@ In short (details in the [README's Security section](README.md#security)):
   valid signature refused, CSRF tokens on every form, throttled sign-ins.
 - **Narrow reach:** Postgres isn't published, the containers run as an
   unprivileged user, and Branchwarden's only write to GitHub is requesting reviewers.
-- **CI** runs the tests, `pip-audit` and `gitleaks` on every push.
+- **CI** runs the unit, integration and browser tests, `pip-audit` and
+  `gitleaks` on every push, and release images are built only from tags that
+  passed it ([CI and releases](README.md#ci-and-releases)).
 
 Out of scope: the Postgres volume isn't encrypted by Branchwarden (put it on
 an encrypted disk), and the security of the host and of GitHub, Teams and Slack themselves.

@@ -5,6 +5,14 @@
   </picture>
 </p>
 
+<p align="center">
+  <a href="https://github.com/chrisnock-personal/branchwarden/actions/workflows/ci.yml"><img src="https://github.com/chrisnock-personal/branchwarden/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI status"></a>
+  ·
+  <a href="https://github.com/chrisnock-personal/branchwarden/releases/latest">Latest release</a>
+  ·
+  <a href="https://github.com/chrisnock-personal/branchwarden/pkgs/container/branchwarden">Container image</a>
+</p>
+
 **Branchwarden** watches the pull requests and branches across a GitHub
 organisation or account:
 - **Pull requests:** every open PR and what state it's in (draft, needs review,
@@ -311,7 +319,7 @@ of all repos:
 - **Outbound URLs are checked.** Channel webhooks must be `https://` on Slack's
   or Microsoft's hosts, and the public and API addresses must be `https://`.
   Errors never echo a webhook URL, since the URL is the secret.
-- **CI** runs the tests, `pip-audit` and `gitleaks` on every push.
+- **CI** runs the tests, `pip-audit` and `gitleaks` on every push (see [CI and releases](#ci-and-releases)).
 
 **Retention:** closed PRs are kept for 365 days, for the metrics. Messages,
 workflow runs and scans are kept for 90 days. Both are set under *Settings › GitHub*, and older
@@ -369,14 +377,32 @@ releases of the image tag.
 | `BRANCHWARDEN_TLS` | `on` | `off` only behind a TLS proxy (with `BRANCHWARDEN_BEHIND_PROXY=true`) |
 | `GITHUB_TARGETS`, `GITHUB_TOKEN`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_FILE`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_API_URL`, `PUBLIC_URL` | | imported on the first start only, then edited in the dashboard |
 
-## Releases
+## CI and releases
+
+Two GitHub Actions workflows, both in `.github/workflows/`:
+
+- **`ci.yml`, on every push and pull request** ([runs](https://github.com/chrisnock-personal/branchwarden/actions/workflows/ci.yml)):
+  - the unit tests: PR states, branch rules, CODEOWNERS, working hours,
+    reviewer selection, cron schedules, workflow matching, repo health, PR
+    size and stalls, ticket keys, message rendering, signatures,
+    encryption, TLS checks and templates,
+  - the integration tests, against a Postgres service container: the scanner
+    end to end with a stand-in for GitHub, routing and the delivery queue,
+    workflows, skipping unchanged repos, the demo data, and every page,
+  - the browser test, in Chromium: first-run setup, every section, a repo
+    page, filters, a workflow row, the theme switch, a form and the menu,
+  - `pip-audit` for known vulnerabilities in the pinned dependencies,
+  - `gitleaks` for secrets anywhere in the history.
+- **`release.yml`, on a `vX.Y.Z` tag** ([runs](https://github.com/chrisnock-personal/branchwarden/actions/workflows/release.yml)):
+  checks the tag matches `version.py`, then builds the image for amd64 and
+  arm64 and publishes it to `ghcr.io/chrisnock-personal/branchwarden` as
+  `:X.Y.Z`, `:X.Y` and `:latest`. It refuses a tag whose commit hasn't passed
+  `ci.yml`.
 
 The version is in `version.py`. It's shown at the foot of every page, in
 `/healthz`, and in the User-Agent sent to GitHub. Each release gets a
-[CHANGELOG](CHANGELOG.md) entry and a `vX.Y.Z` tag. Pushing the tag runs
-`.github/workflows/release.yml`, which checks the tag matches `version.py`,
-then builds the image for amd64 and arm64 and publishes it to
-`ghcr.io/chrisnock-personal/branchwarden` as `:X.Y.Z`, `:X.Y` and `:latest`.
+[CHANGELOG](CHANGELOG.md) entry, a `vX.Y.Z` tag and a GitHub release. A
+release is tagged after CI has passed on its commit; `release.yml` checks.
 
 ## Development
 
@@ -393,7 +419,7 @@ repos, routing and the delivery queue (sent, retried with back-off, failed,
 switched-off channels), workflows, the demo data, and every page rendering.
 The browser test adds Chromium: first-run setup, every section from the
 header, a repo page, filters, a workflow row, the theme switch, a form and
-the menu. CI runs both on every push.
+the menu. [CI](#ci-and-releases) runs both on every push.
 
 ```bash
 TEST_DATABASE_URL=postgresql://user:pass@localhost:5432/branchwarden_test python -m pytest -q
