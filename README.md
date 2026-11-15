@@ -328,9 +328,67 @@ records are removed once an hour.
 **Reporting a vulnerability:** privately, through the repository's Security
 tab. See [SECURITY.md](SECURITY.md).
 
-**Not covered yet:** the Postgres volume itself isn't encrypted. Run it on an
-encrypted disk if PR titles and branch names are sensitive. Back up the `keys`
-volume with the database: without it, stored secrets can't be read.
+**Not covered by Branchwarden:** the Postgres volume itself isn't encrypted.
+Run it on an encrypted disk if PR titles and branch names are sensitive.
+Backups are encrypted (see [Backups](#backups)).
+
+## Backups
+
+`deploy/backup.sh` writes one file holding everything needed to rebuild
+Branchwarden, encrypted with [age](https://age-encryption.org):
+- **the database:** a `pg_dump`,
+- **the `keys` volume:** without it, the stored tokens and webhook URLs in the
+  dump can't be read, so the two always travel together,
+- **the `certs` volume:** your TLS certificate,
+- **`.env`:** the database password and settings.
+
+It's encrypted to public keys you choose, so the server can make backups but
+can't read them: keep the private key somewhere else.
+
+```bash
+age-keygen -o branchwarden-backup.key           # once, on your own machine; note the public key (age1…)
+deploy/backup.sh -r age1… -o /backups --keep 14  # from the directory with docker-compose.yml
+```
+
+To restore, on the same host or a fresh one with the repo (or just the compose
+file and `deploy/`) in place:
+
+```bash
+deploy/restore.sh -i branchwarden-backup.key /backups/branchwarden-20261115-020000.tar.age
+```
+
+It puts back `.env` if there isn't one, the volumes and the database, then
+starts Branchwarden. It won't replace a database that already has data unless
+you add `--force`, and it checks that before stopping anything.
+
+- **Other setups:** `ENGINE=docker COMPOSE="docker compose"` for Docker; for
+  the quadlets, `--db-container branchwarden-db` and, when restoring,
+  `--services "branchwarden-worker branchwarden-dashboard"`.
+- **Without age installed:** `age` is in Fedora, Debian, Ubuntu and Homebrew.
+  The scripts call whatever `AGE` names, so a container works too.
+- **Nightly, with systemd** (`~/.config/systemd/user/branchwarden-backup.service`
+  and `.timer`):
+
+  ```ini
+  # branchwarden-backup.service
+  [Service]
+  Type=oneshot
+  WorkingDirectory=%h/branchwarden
+  ExecStart=%h/branchwarden/deploy/backup.sh -r age1… -o %h/backups --keep 14
+
+  # branchwarden-backup.timer
+  [Timer]
+  OnCalendar=*-*-* 02:00
+  Persistent=true
+  [Install]
+  WantedBy=timers.target
+  ```
+
+  Then `systemctl --user enable --now branchwarden-backup.timer`.
+
+CI backs up the real stack with the demo data and a sealed secret, destroys
+everything, restores it and checks it all came back, on every push
+(`tests/backup_roundtrip.sh`).
 
 ## Health checks
 
@@ -392,7 +450,9 @@ Two GitHub Actions workflows, both in `.github/workflows/`:
   - the browser test, in Chromium: first-run setup, every section, a repo
     page, filters, a workflow row, the theme switch, a form and the menu,
   - `pip-audit` for known vulnerabilities in the pinned dependencies,
-  - `gitleaks` for secrets anywhere in the history.
+  - `gitleaks` for secrets anywhere in the history,
+  - a backup and restore from scratch, with docker compose: back up the stack
+    with the demo data and a sealed secret, destroy it, restore it, check.
 - **`release.yml`, on a `vX.Y.Z` tag** ([runs](https://github.com/chrisnock-personal/branchwarden/actions/workflows/release.yml)):
   checks the tag matches `version.py`, then builds the image for amd64 and
   arm64 and publishes it to `ghcr.io/chrisnock-personal/branchwarden` as
@@ -449,6 +509,7 @@ The files:
 | `demo.py` | Loading and removing the demo data |
 | `healthcheck.py` | Container health checks, and the worker's heartbeat |
 | `deploy/quadlet/` | Podman quadlet files, to run as systemd services |
+| `deploy/backup.sh`, `deploy/restore.sh` | Encrypted backups and restores |
 | `dashboard.py`, `admin.py`, `templates/` | The web UI |
 
 ## Licence

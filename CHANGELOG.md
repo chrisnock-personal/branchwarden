@@ -4,6 +4,18 @@ All notable changes to Branchwarden. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Encrypted backups** (#3): `deploy/backup.sh` puts the database dump, the
+  `keys` and `certs` volumes and `.env` in one file encrypted with age to the
+  public keys you give (with `--keep N` to prune old ones), and
+  `deploy/restore.sh` puts it all back on the same host or a fresh one, then
+  starts Branchwarden. It won't overwrite existing data without `--force`.
+  Works with podman or docker compose and with the quadlets. CI runs a backup,
+  destroys the stack, restores it and checks it all came back, on every push.
+
 ## [0.4.0] - 2026-11-15
 
 ### Added

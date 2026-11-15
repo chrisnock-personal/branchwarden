@@ -42,3 +42,27 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Backup and restore from scratch: the real stack with docker compose, the
+  # demo data and a sealed secret; back up, destroy everything, restore, check.
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: age
+        run: sudo apt-get update -q && sudo apt-get install -y -q age
+      - name: Start Branchwarden
+        run: |
+          printf 'POSTGRES_PASSWORD=ci-only-backup\nDASHBOARD_EXPOSE=8443\n' > .env
+          docker compose build -q
+          docker compose up -d
+          for _ in $(seq 1 60); do curl -skf https://localhost:8443/healthz && break; sleep 2; done
+          docker compose exec -T worker python demo.py
+      - name: Back up, destroy, restore
+        env:
+          ENGINE: docker
+          COMPOSE: docker compose
+        run: tests/backup_roundtrip.sh
+      - name: Logs, if it failed
+        if: failure()
+        run: docker compose logs --tail 50
