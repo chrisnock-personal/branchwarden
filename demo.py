@@ -212,8 +212,9 @@ def _history(b: _Builder) -> None:
     db.execute(conn, "INSERT INTO org_cache (login, members, teams, fetched_at) VALUES (%s, %s, %s, NOW())",
                (ORG, Json(sorted(PEOPLE)), Json([{"slug": f"{ORG}/{t}", "name": t.capitalize()}
                                                   for t in ("identity", "payments", "platform", "mobile")])))
-    for i in range(14):
-        event = rand.choice(["pull_request", "pull_request_review", "check_suite", "push", "workflow_run"])
+    for i in range(13, -1, -1):              # oldest first, as they'd have arrived
+        event = "delete" if i in (3, 9) else \
+            rand.choice(["pull_request", "pull_request_review", "check_suite", "push", "workflow_run"])
         db.execute(conn, "INSERT INTO webhook_log (received_at, event, action, repo, status) VALUES (%s, %s, %s, %s, 202)",
                    (b.at(0, i * 1.7 + rand.random()), event, "completed" if event in ("check_suite", "workflow_run")
                     else ("submitted" if event == "pull_request_review" else ("synchronize" if event == "pull_request" else None)),
