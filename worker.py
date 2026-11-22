@@ -129,9 +129,10 @@ def tick(state: dict, *, force_full: bool = False) -> None:
         if max_id:
             db.execute(conn, "DELETE FROM scan_requests WHERE id <= %s", (max_id,))
             conn.commit()
-        if force_full or time.monotonic() - state.get("reminders_at", 0) >= REMINDER_EVERY:
+        demo = settings.flag(values, "DEMO_MODE")      # demo data: nothing is assigned, queued or sent
+        if not demo and (force_full or time.monotonic() - state.get("reminders_at", 0) >= REMINDER_EVERY):
             state["reminders_at"] = time.monotonic()
-            assigned = 0 if settings.flag(values, "DEMO_MODE") else rules.run_auto_assign(conn, values, now)
+            assigned = rules.run_auto_assign(conn, values, now)
             conn.commit()
             if assigned:
                 log.info("Auto-assigned reviewers on %d pull request%s", assigned, "s" if assigned != 1 else "")
@@ -147,7 +148,7 @@ def tick(state: dict, *, force_full: bool = False) -> None:
             housekeeping.prune(conn, values)
             housekeeping.snapshot(conn, values, now)
             conn.commit()
-        sent, failed = notify.deliver(conn)
+        sent, failed = notify.deliver(conn) if not demo else (0, 0)
         if sent or failed:
             log.info("Delivered %d messages, %d failed", sent, failed)
 

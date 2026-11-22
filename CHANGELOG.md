@@ -4,6 +4,16 @@ All notable changes to Branchwarden. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **The demo looks lived-in:** its channels have a few days of delivery history
+  (with one failing, as happens), scans and webhook events, and demo-org's
+  people and teams, so the reviewer picker works without GitHub.
+- **In demo mode nothing is sent at all:** no reminders, digests, posts,
+  morning messages or deliveries.
+
 ## [0.5.1] - 2026-11-22
 
 ### Security

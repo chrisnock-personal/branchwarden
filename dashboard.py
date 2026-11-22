@@ -289,6 +289,8 @@ SORTS = (("waiting", "Longest waiting first"), ("newest", "Newest first"), ("upd
 def _org_cache(conn, login: str, kind: str, values: dict, refresh: bool = False) -> dict:
     """Members and teams of an organisation, cached for an hour."""
     row = db.one(conn, "SELECT * FROM org_cache WHERE login = %s", (login,))
+    if row and settings.flag(values, "DEMO_MODE"):
+        return row                              # the demo's people: there's no GitHub to ask
     if row and not refresh and (datetime.now(timezone.utc) - row["fetched_at"]).total_seconds() < ORG_CACHE_SECONDS:
         return row
     client = Connections(values).client_for(login)

@@ -51,7 +51,7 @@ PR_COLS = ("repo_id", "number", "title", "url", "author", "state", "draft", "hea
            "merged_at", "merged_by", "closed_at", "first_review_at", "body_tickets")
 # Everything the demo writes, emptied before loading and on removal (targets cascade to repos and their rows).
 TABLES = ("snoozes", "assignments", "reminders", "threads", "notifications", "branch_deletions", "daily",
-          "channels", "people", "scan_requests", "targets")
+          "channels", "people", "scan_requests", "targets", "org_cache", "webhook_log", "scan_log")
 
 
 class Refused(Exception):
@@ -188,6 +188,58 @@ def _workflows(b: _Builder) -> int:
     return run_id[0] - 900_000_000
 
 
+def _history(b: _Builder) -> None:
+    """What a few days of running would leave: messages sent (and one channel failing), the
+    org's people and teams (so the reviewer picker works without GitHub), webhook events."""
+    conn, rand = b.conn, b.rand
+    chans = {c["name"]: c["id"] for c in db.rows(conn, "SELECT id, name FROM channels")}
+    kinds = (("opened", "New pull request"), ("review", "Approved by sasha"), ("closed", "Merged"),
+             ("reminder:waiting", "Waiting for review · 26 h"), ("assigned", "Reviewer assigned"))
+    for i in range(46):
+        name = rand.choice(["Platform reviews", "#web-team", "#eng-all", "#eng-all"])
+        kind, heading = rand.choice(kinds)
+        at = b.at(rand.uniform(0.05, 6))
+        db.execute(conn, """INSERT INTO notifications (channel_id, kind, payload, status, attempts, created_at,
+                                next_attempt_at, sent_at) VALUES (%s, %s, %s, 'sent', 1, %s, %s, %s)""",
+                   (chans[name], kind, Json({"heading": heading, "pr": f"{rand.choice(REPOS)} #{rand.randint(30, 300)}"}),
+                    at, at, at + timedelta(seconds=rand.randint(1, 4))))
+    for days in (1.5, 0.6, 0.2):              # #identity's bot was removed from the channel
+        at = b.at(days)
+        db.execute(conn, """INSERT INTO notifications (channel_id, kind, payload, status, attempts, last_error,
+                                created_at, next_attempt_at) VALUES (%s, 'opened', %s, 'failed', 1,
+                                'Slack: not_in_channel', %s, %s)""",
+                   (chans["#identity"], Json({"heading": "New pull request", "pr": "auth-service #77"}), at, at))
+    db.execute(conn, "INSERT INTO org_cache (login, members, teams, fetched_at) VALUES (%s, %s, %s, NOW())",
+               (ORG, Json(sorted(PEOPLE)), Json([{"slug": f"{ORG}/{t}", "name": t.capitalize()}
+                                                  for t in ("identity", "payments", "platform", "mobile")])))
+    for i in range(14):
+        event = rand.choice(["pull_request", "pull_request_review", "check_suite", "push", "workflow_run"])
+        db.execute(conn, "INSERT INTO webhook_log (received_at, event, action, repo, status) VALUES (%s, %s, %s, %s, 202)",
+                   (b.at(0, i * 1.7 + rand.random()), event, "completed" if event in ("check_suite", "workflow_run")
+                    else ("submitted" if event == "pull_request_review" else ("synchronize" if event == "pull_request" else None)),
+                    f"{ORG}/{rand.choice(REPOS)}"))
+
+
+def _scans(b: _Builder) -> None:
+    """The last four hours of scans: mostly skipping unchanged repos, a few webhook rescans."""
+    conn, rand = b.conn, b.rand
+    open_prs = db.one(conn, "SELECT COUNT(*) AS n FROM pull_requests WHERE state = 'open'")["n"]
+    branches = db.one(conn, "SELECT COUNT(*) AS n FROM branches")["n"]
+    budget = 4990
+    for i in range(24, 0, -1):
+        start = b.at(0, i / 6)
+        webhook = rand.random() < 0.25
+        skipped = 0 if webhook else (6 if i % 6 else rand.randint(3, 5))
+        requests = 1 if webhook else 1 + (6 - skipped) * 3 + 2
+        budget -= requests
+        db.execute(conn, """INSERT INTO scan_log (started_at, finished_at, trigger, repos, prs, branches, events,
+                                skipped, requests, rate_remaining, rate_limit)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 5000)""",
+                   (start, start + timedelta(seconds=rand.uniform(0.8, 3.5) if skipped < 6 else 0.6),
+                    "webhook" if webhook else "schedule", 1 if webhook else len(REPOS), open_prs, branches,
+                    rand.choice([0, 0, 1, 2]), skipped, requests, budget))
+
+
 def load(conn, values: dict, now: Optional[datetime] = None) -> dict:
     """Load the demo (replacing an earlier one). Returns what was loaded."""
     check(conn, values)
@@ -302,18 +354,16 @@ def load(conn, values: dict, now: Optional[datetime] = None) -> dict:
     db.execute(conn, "INSERT INTO assignments (pr_id, reviewer, by_rule, by_name, assigned_at) VALUES "
                      "(%s, 'dana', TRUE, 'Branchwarden', %s), (%s, 'demo-org/identity', FALSE, %s, %s)",
                (pr77, b.at(2.0), pr77, PEOPLE["tom"], b.at(2.1)))
-    db.execute(conn, "INSERT INTO channels (kind, name, repos, teams, enabled) VALUES "
-                     "('teams', 'Platform reviews', 'auth-*,infra', '', FALSE), ('slack', '#web-team', 'web-*,mobile-*', '', FALSE), "
-                     "('slack', '#identity', '', 'demo-org/identity', FALSE), ('slack', '#eng-all', '', '', FALSE)")
+    db.execute(conn, "INSERT INTO channels (kind, name, repos, teams) VALUES "
+                     "('teams', 'Platform reviews', 'auth-*,infra', ''), ('slack', '#web-team', 'web-*,mobile-*', ''), "
+                     "('slack', '#identity', '', 'demo-org/identity'), ('slack', '#eng-all', '', '')")
+    _history(b)
     runs = _workflows(b)
     changes = {"DEMO_MODE": "true"}
     if not settings.get(values, "TICKET_URL"):
         changes["TICKET_URL"] = TICKETS
     settings.save(conn, changes, "demo")
-    db.execute(conn, """INSERT INTO scan_log (started_at, finished_at, trigger, repos, prs, branches, events, error)
-                        VALUES (NOW(), NOW(), 'manual', %s, %s, %s, 0, NULL)""",
-               (len(REPOS), db.one(conn, "SELECT COUNT(*) AS n FROM pull_requests WHERE state = 'open'")["n"],
-                db.one(conn, "SELECT COUNT(*) AS n FROM branches")["n"]))
+    _scans(b)
     return {"repos": len(REPOS), "open": db.one(conn, "SELECT COUNT(*) AS n FROM pull_requests WHERE state = 'open'")["n"],
             "prs": db.one(conn, "SELECT COUNT(*) AS n FROM pull_requests")["n"], "runs": runs}
 
