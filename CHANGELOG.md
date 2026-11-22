@@ -4,6 +4,17 @@ All notable changes to Branchwarden. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **An MCP server for AI agents** (#21): `branchwarden mcp` (with the CLI's
+  `mcp` extra) serves Branchwarden as tools over stdio for Claude Code, Claude
+  Desktop and other MCP clients, signed in like the CLI. Read-only tools are
+  marked read-only; `request_reviewers` is marked as writing to GitHub and is
+  a dry run unless asked; a read-only token keeps an agent to looking. Tested
+  with the MCP SDK's own client over stdio against the running app.
+
 ## [0.5.2] - 2026-11-22
 
 ### Changed

@@ -74,7 +74,40 @@ branchwarden login --url https://branchwarden.example.com
 - **Versions:** the CLI's version matches the server's, and it warns when the
   two differ.
 
-## For AI agents
+## For AI agents: an MCP server
+
+`branchwarden mcp` serves the same things as tools over MCP (stdio), for
+Claude Code, Claude Desktop and other MCP clients. It needs the `mcp` extra:
+
+```bash
+pipx install "branchwarden-cli[mcp] @ git+https://github.com/chrisnock-personal/branchwarden#subdirectory=cli"
+branchwarden login --url https://branchwarden.example.com      # once: the server uses the same sign-in
+claude mcp add branchwarden -- branchwarden mcp                # Claude Code
+```
+
+For Claude Desktop, add it to `claude_desktop_config.json`:
+
+```json
+{ "mcpServers": { "branchwarden": { "command": "branchwarden", "args": ["mcp"] } } }
+```
+
+On a machine without a keychain, give it `"env": {"BRANCHWARDEN_URL": "…",
+"BRANCHWARDEN_TOKEN": "…"}` (and `BRANCHWARDEN_FINGERPRINT` for a self-signed
+certificate).
+
+- **Tools:** `my_work`, `overview`, `list_pull_requests` (with the dashboard's
+  filters), `get_pull_request`, `list_branches`, `list_repositories`,
+  `get_repository`, `workflows`, `metrics`, `mvp` and `whoami` only read, and
+  are marked read-only.
+- **Actions:** `request_reviewers`, `snooze_reminders`, `ignore_branch`,
+  `unignore_branch` and `start_scan` change things.
+- **GitHub writes:** `request_reviewers` is marked as reaching outside, to
+  GitHub. It's a **dry run unless the agent passes `dry_run=false`**, so it
+  shows what it would do first.
+- **The token decides:** with a read-only token, the agent can look but not
+  change anything. The server refuses, whatever the agent tries.
+
+## For AI agents using the CLI
 
 `branchwarden --help` and each command's `--help` say everything a command
 needs. Give an agent a **read-only** token unless it has to change things: then

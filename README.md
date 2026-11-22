@@ -355,6 +355,9 @@ branchwarden me
 - **The token** lives in the OS keychain, or in `BRANCHWARDEN_TOKEN` for CI.
 - **A self-signed certificate** is pinned by its fingerprint at login.
 - **Output:** `--json` gives the API's own JSON and `--quiet` just ids.
+- **MCP:** `branchwarden mcp` serves the same as tools for AI agents (Claude
+  Code, Claude Desktop): read-only tools marked as such, reviewer requests a
+  dry run unless asked, and a read-only token keeps an agent to looking.
 - **Exit codes** say what happened, so scripts can act on them.
 
 ## Roles

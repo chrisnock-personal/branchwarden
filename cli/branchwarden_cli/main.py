@@ -584,6 +584,18 @@ def cmd_admin(args):
                 ids=[i.get("id", i.get("key", i.get("login"))) for i in items])
 
 
+def cmd_mcp(args):
+    try:
+        from . import mcp_server
+    except ImportError:
+        raise Fail('The MCP server needs the mcp extra: pipx install "branchwarden-cli[mcp] @ git+https://github.com/'
+                   'chrisnock-personal/branchwarden#subdirectory=cli" (or pip install "mcp>=1.26,<2").', 1) from None
+    try:
+        mcp_server.run()
+    except RuntimeError as exc:
+        raise Fail(str(exc), 3) from None
+
+
 def cmd_api(args):
     body = None
     if args.data:
@@ -736,6 +748,9 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("action", choices=["list", "set"], nargs="?", default="list")
     s.add_argument("name", nargs="?", help="set: the settings section, or the rule's key")
     s.add_argument("pairs", nargs="*", metavar="KEY=VALUE", help="set: what to change, e.g. STALE_DAYS=45")
+
+    add("mcp", cmd_mcp, "run as an MCP server over stdio, for AI agents such as Claude Code "
+                        "(signs in like the CLI; needs the mcp extra)")
 
     s = add("api", cmd_api, "call any API endpoint and print its JSON (see docs/api.md)")
     s.add_argument("method", help="GET, POST, PATCH, PUT or DELETE")
