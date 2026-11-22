@@ -1,3 +1,3 @@
 """Branchwarden's version. Bump it with each release and add a CHANGELOG.md entry."""
 
-VERSION = "0.5.2"
+VERSION = "0.6.0"
