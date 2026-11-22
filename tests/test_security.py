@@ -80,12 +80,12 @@ def test_self_signed_certificate(monkeypatch):
 
 
 def test_channel_urls_must_be_https_and_the_right_service():
-    import admin
-    assert admin._channel_url_problem("slack", "http://hooks.slack.com/services/x")
-    assert admin._channel_url_problem("slack", "https://evil.example.com/x")
-    assert admin._channel_url_problem("slack", "https://hooks.slack.com/services/T/B/x") is None
-    assert admin._channel_url_problem("teams", "https://prod-01.westeurope.logic.azure.com:443/workflows/x") is None
-    assert admin._channel_url_problem("teams", "https://169.254.169.254/latest")
+    import actions
+    assert actions.channel_url_problem("slack", "http://hooks.slack.com/services/x")
+    assert actions.channel_url_problem("slack", "https://evil.example.com/x")
+    assert actions.channel_url_problem("slack", "https://hooks.slack.com/services/T/B/x") is None
+    assert actions.channel_url_problem("teams", "https://prod-01.westeurope.logic.azure.com:443/workflows/x") is None
+    assert actions.channel_url_problem("teams", "https://169.254.169.254/latest")
 
 
 def test_safe_next():

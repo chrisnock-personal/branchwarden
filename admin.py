@@ -12,7 +12,6 @@ reaches it first can't simply claim the admin account.
 from __future__ import annotations
 
 import logging
-import re
 import secrets
 import time
 from collections import defaultdict, deque
@@ -20,14 +19,14 @@ from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import urlsplit
 
-import psycopg2
 from flask import Blueprint, abort, flash, g, redirect, render_template, request, session, url_for
-from psycopg2.extras import Json
 
+import access
+import actions
+import apitokens
 import analysis
 import db
 import ghlogin
-from metrics import compact as metrics_compact
 import notify
 import rules
 import settings
@@ -63,7 +62,9 @@ def _template_globals():
 @bp.before_app_request
 def guard():
     g.user = None
-    if request.endpoint in ALWAYS_OPEN or request.endpoint is None:
+    if request.endpoint in ALWAYS_OPEN or request.blueprint == "api" or request.path.startswith("/api/"):
+        return None             # the API checks its own bearer tokens (see api.py)
+    if request.endpoint is None:
         return None
     if request.method == "POST":
         sent = request.form.get("csrf", "")
@@ -81,7 +82,7 @@ def guard():
     if g.user is None:
         session.pop("uid", None)
         return redirect(url_for("admin.login", next=_safe_next(request.full_path)))
-    if request.blueprint == "admin" and g.user["role"] != "admin":
+    if request.blueprint == "admin" and not access.allowed(g.user["role"], "admin"):
         abort(403)
     return None
 
@@ -266,6 +267,10 @@ def welcome(token: str):
     return render_template("welcome.html", expired=False, person=person, error=error)
 
 
+def _flash(r) -> None:
+    flash(r.message, r.tone)
+
+
 def _saved(lines: list[str]) -> None:
     if lines:
         flash(f"Saved {len(lines)} change{'s' if len(lines) != 1 else ''}. "
@@ -331,62 +336,17 @@ def github():
         intervals=settings.SCAN_INTERVALS, suggested_secret=secrets.token_hex(24))
 
 
-def _demo_refusal(anchor: str):
-    """While demo data is loaded, GitHub can't be connected: demo and real data never mix."""
-    with db.get_conn() as conn:
-        row = db.one(conn, "SELECT value FROM settings WHERE key = 'DEMO_MODE'")
-    if row and row["value"].lower() == "true":
-        flash("Demo data is loaded. Remove it first (python demo.py --remove), then connect GitHub.", "bad")
-        return redirect(url_for("admin.github") + anchor)
-    return None
-
-
 @bp.post("/settings/github/app")
 def github_app():
-    refused = _demo_refusal("#app")
-    if refused:
-        return refused
-    form = request.form
-    changes = {"GITHUB_APP_ENABLED": "true" if form.get("GITHUB_APP_ENABLED") else "false",
-               "GITHUB_APP_ID": form.get("GITHUB_APP_ID", "").strip()}
-    key = form.get("GITHUB_APP_PRIVATE_KEY", "").strip()
-    if key:
-        if "PRIVATE KEY-----" not in key:
-            flash("The private key should be the whole .pem file GitHub gave you, BEGIN and END lines included.", "bad")
-            return redirect(url_for("admin.github"))
-        changes["GITHUB_APP_PRIVATE_KEY"] = key
-    elif form.get("remove_key"):
-        changes["GITHUB_APP_PRIVATE_KEY"] = None
-    secret = form.get("GITHUB_WEBHOOK_SECRET", "").strip()
-    if secret and len(secret) < 20:
-        flash("Use a webhook secret of at least 20 random characters.", "bad")
-        return redirect(url_for("admin.github") + "#app")
-    if secret:
-        changes["GITHUB_WEBHOOK_SECRET"] = secret
-    if changes["GITHUB_APP_ID"] and not changes["GITHUB_APP_ID"].isdigit():
-        flash("The App ID is a number, shown on the App's settings page.", "bad")
-        return redirect(url_for("admin.github"))
     with db.get_conn() as conn:
-        _saved(settings.save(conn, changes, _actor()))
+        _flash(actions.github_app(conn, request.form, _actor()))
     return redirect(url_for("admin.github") + "#app")
 
 
 @bp.post("/settings/github/token")
 def github_token():
-    refused = _demo_refusal("#token")
-    if refused:
-        return refused
-    form = request.form
-    changes = {"GITHUB_TOKEN_ENABLED": "true" if form.get("GITHUB_TOKEN_ENABLED") else "false"}
-    token = form.get("GITHUB_TOKEN", "").strip()
-    if token:
-        changes["GITHUB_TOKEN"] = token
-        changes["GITHUB_TOKEN_EXPIRES"] = None
-    elif form.get("remove_token"):
-        changes["GITHUB_TOKEN"] = None
-        changes["GITHUB_TOKEN_EXPIRES"] = None
     with db.get_conn() as conn:
-        _saved(settings.save(conn, changes, _actor()))
+        _flash(actions.github_token(conn, request.form, _actor()))
     return redirect(url_for("admin.github") + "#token")
 
 
@@ -423,134 +383,36 @@ def github_test():
 
 @bp.post("/settings/github/prs")
 def github_prs():
-    form = request.form
-    back = redirect(url_for("admin.github") + "#prs")
-    limits = {"BIG_PR_LINES": (50, 100000), "BIG_PR_FILES": (5, 10000), "STALLED_DAYS": (1, 365)}
-    changes = {}
-    for key, (lo, hi) in limits.items():
-        v = form.get(key, "").strip()
-        if not v.isdigit() or not lo <= int(v) <= hi:
-            flash(f"{settings.label(key)}: a whole number from {lo} to {hi}.", "bad")
-            return back
-        changes[key] = v
-    pattern = form.get("TICKET_PATTERN", "").strip() or settings.DEFAULTS["TICKET_PATTERN"][1]
-    if len(pattern) > 100 or analysis.ticket_regex(pattern) is None:
-        flash("The ticket key pattern isn't a regular expression Branchwarden can use (100 characters at most).", "bad")
-        return back
-    url = form.get("TICKET_URL", "").strip()
-    if url and (urlsplit(url).scheme != "https" or "{key}" not in url):
-        flash("The ticket link must start with https:// and contain {key}.", "bad")
-        return back
-    changes.update(TICKET_PATTERN=pattern, TICKET_URL=url)
     with db.get_conn() as conn:
-        lines = settings.save(conn, changes, _actor())
-    flash("Saved. " + ("; ".join(lines) if lines else "Nothing changed.")
-          + (" Ticket keys in descriptions are picked up as each repo is next read in full." if url else ""), "ok")
-    return back
+        _flash(actions.pr_settings(conn, request.form, _actor()))
+    return redirect(url_for("admin.github") + "#prs")
 
 
 @bp.post("/settings/github/scan")
 def github_scan():
-    form = request.form
-    interval = form.get("SCAN_INTERVAL_MINUTES", "10")
-    stale = form.get("STALE_DAYS", "30").strip()
-    if not stale.isdigit() or not 1 <= int(stale) <= 3650:
-        flash("Stale after must be a number of days.", "bad")
-        return redirect(url_for("admin.github") + "#scan")
-    keep_pr, keep_log = form.get("RETAIN_PR_DAYS", "365").strip(), form.get("RETAIN_LOG_DAYS", "90").strip()
-    if not (keep_pr.isdigit() and 30 <= int(keep_pr) <= 3650 and keep_log.isdigit() and 7 <= int(keep_log) <= 3650):
-        flash("Keep closed PRs for 30 to 3650 days, and messages and scans for 7 to 3650 days.", "bad")
-        return redirect(url_for("admin.github") + "#scan")
-    changes = {
-        "REPO_INCLUDE": settings.join_list(settings.split_list(form.get("REPO_INCLUDE", ""))) or "*",
-        "REPO_EXCLUDE": settings.join_list(settings.split_list(form.get("REPO_EXCLUDE", ""))),
-        "INCLUDE_ARCHIVED": "true" if form.get("INCLUDE_ARCHIVED") else "false",
-        "INCLUDE_FORKS": "true" if form.get("INCLUDE_FORKS") else "false",
-        "STALE_DAYS": stale,
-        "RETAIN_PR_DAYS": keep_pr,
-        "RETAIN_LOG_DAYS": keep_log,
-        "NEVER_FLAG": settings.join_list(settings.split_list(form.get("NEVER_FLAG", ""))),
-        "PUBLIC_URL": form.get("PUBLIC_URL", "").strip().rstrip("/"),
-        "GITHUB_API_URL": form.get("GITHUB_API_URL", "").strip().rstrip("/") or "https://api.github.com",
-    }
-    if interval in dict(settings.SCAN_INTERVALS):
-        changes["SCAN_INTERVAL_MINUTES"] = interval
-    for key in ("PUBLIC_URL", "GITHUB_API_URL"):
-        if changes[key] and urlsplit(changes[key]).scheme != "https":
-            flash(f"{settings.label(key)} must start with https://", "bad")
-            return redirect(url_for("admin.github") + "#scan")
     with db.get_conn() as conn:
-        lines = settings.save(conn, changes, _actor())
-        if any(k in " ".join(lines) for k in ("Only repos", "Skip repos", "archived", "forks")):
-            db.request_scan(conn, "*", "scan settings changed")
-    _saved(lines)
+        _flash(actions.scan_settings(conn, request.form, _actor()))
     return redirect(url_for("admin.github") + "#scan")
-
-
-LOGIN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
 
 
 @bp.post("/settings/targets/new")
 def target_new():
-    refused = _demo_refusal("#targets")
-    if refused:
-        return refused
-    login = request.form.get("login", "").strip().lstrip("@").lower()
-    kind = request.form.get("kind", "org")
-    via = request.form.get("via", "auto")
-    if not LOGIN.match(login) or kind not in ("org", "user") or via not in ("auto", "app", "token"):
-        flash("Enter a GitHub organisation or account name.", "bad")
-        return redirect(url_for("admin.github") + "#targets")
     with db.get_conn() as conn:
-        try:
-            db.execute(conn, "INSERT INTO targets (login, kind, via) VALUES (%s, %s, %s)", (login, kind, via))
-        except psycopg2.errors.UniqueViolation:
-            conn.rollback()
-            flash(f"{login} is already on the list.", "info")
-            return redirect(url_for("admin.github") + "#targets")
-        settings.history_add(conn, _actor(), f"Added {kind} {login} to scan")
-        db.request_scan(conn, "*", f"{login} added")
-    flash(f"{login} added. Its first scan starts within a few seconds; it records what's there "
-          "without sending any messages.", "ok")
+        _flash(actions.target_add(conn, request.form, _actor()))
     return redirect(url_for("admin.github") + "#targets")
 
 
 @bp.post("/settings/targets/<int:target_id>")
 def target_save(target_id: int):
-    form = request.form
     with db.get_conn() as conn:
-        t = db.one(conn, "SELECT * FROM targets WHERE id = %s", (target_id,))
-        if not t:
-            abort(404)
-        if form.get("delete"):
-            db.execute(conn, "DELETE FROM targets WHERE id = %s", (target_id,))
-            settings.history_add(conn, _actor(), f"Stopped scanning {t['login']}")
-            flash(f"{t['login']} removed, with its repos, PRs and branches.", "ok")
-        elif form.get("toggle"):
-            db.execute(conn, "UPDATE targets SET enabled = NOT enabled WHERE id = %s", (target_id,))
-            settings.history_add(conn, _actor(), f"{t['login']}: scanning {'off' if t['enabled'] else 'on'}")
-            flash(f"Scanning {t['login']} switched {'off' if t['enabled'] else 'on'}.", "ok")
-        elif form.get("via") in ("auto", "app", "token"):
-            db.execute(conn, "UPDATE targets SET via = %s WHERE id = %s", (form["via"], target_id))
-            settings.history_add(conn, _actor(), f"{t['login']}: reached through {form['via']}")
-            flash(f"{t['login']} is now reached through {form['via']}.", "ok")
+        r = actions.target_update(conn, target_id, request.form, _actor())
+    if r.status == 404:
+        abort(404)
+    _flash(r)
     return redirect(url_for("admin.github") + "#targets")
 
 
 # ─── Settings: channels and reminders ───────────────────────────────────────
-
-def _channel_url_problem(kind: str, url: str) -> Optional[str]:
-    parts = urlsplit(url)
-    if parts.scheme != "https" or not parts.netloc:
-        return "The webhook URL must start with https://"
-    host = parts.hostname or ""
-    if kind == "slack" and not host.endswith("slack.com"):
-        return "A Slack incoming webhook URL starts with https://hooks.slack.com/"
-    if kind == "teams" and not (host.endswith(".logic.azure.com") or host.endswith(".powerplatform.com")
-                                or host.endswith(".office.com") or host.endswith(".microsoft.com")):
-        return ("A Teams Workflows webhook URL is on logic.azure.com or powerplatform.com: "
-                "make one with the “Post to a channel when a webhook request is received” workflow")
-    return None
 
 
 @bp.get("/settings/notifications")
@@ -579,220 +441,57 @@ def notifications():
                            wf_scopes=rules.WF_SCOPES)
 
 
-SLACK_CHANNEL_ID = re.compile(r"^[CG][A-Z0-9]{6,}$")
-
-
-def _slack_bot_problem(token: str, channel: str) -> Optional[str]:
-    if not token.startswith("xoxb-"):
-        return "A Slack bot token starts with xoxb- (OAuth & Permissions › Bot User OAuth Token)"
-    if not SLACK_CHANNEL_ID.match(channel):
-        return "The Slack channel ID looks like C01ABCDEF23 (channel details › About, at the bottom)"
-    return None
-
-
 @bp.post("/settings/channels/new")
 def channel_new():
-    form = request.form
-    kind = form.get("kind")
-    name = form.get("name", "").strip()
-    url = form.get("url", "").strip()
-    token = form.get("bot_token", "").strip()
-    slack_channel = form.get("slack_channel", "").strip().upper()
-    back = redirect(url_for("admin.notifications", open=f"new-{kind}") + "#new")
-    if kind not in ("teams", "slack") or not name:
-        flash("Give the channel a name and a webhook URL.", "bad")
-        return back
-    if kind == "slack" and (token or slack_channel):
-        problem = _slack_bot_problem(token, slack_channel)
-        url = ""
-    else:
-        problem = _channel_url_problem(kind, url)
-    if problem:
-        flash(problem, "bad")
-        return back
     with db.get_conn() as conn:
-        cid = db.one(conn, """INSERT INTO channels (kind, name, repos, teams, slack_channel) VALUES (%s, %s, %s, %s, %s)
-                              RETURNING id""",
-                     (kind, name, settings.join_list(settings.split_list(form.get("repos", ""))),
-                      settings.join_list(t.lower().lstrip("@") for t in settings.split_list(form.get("teams", ""))),
-                      slack_channel if token else ""))["id"]
-        secret = {settings.channel_token_key(cid): token} if token else {settings.channel_url_key(cid): url}
-        settings.save(conn, secret, _actor(), record=False)
-        settings.history_add(conn, _actor(), f"Added {kind} channel {name}" + (" (bot token, threads)" if token else ""))
-    flash(f"{name} added. Send a test message to check it.", "ok")
-    return redirect(url_for("admin.notifications", open=cid) + f"#ch-{cid}")
-
-
-def _channel_or_404(conn, cid: int) -> dict:
-    c = db.one(conn, "SELECT * FROM channels WHERE id = %s", (cid,))
-    if not c:
-        abort(404)
-    return c
+        r = actions.channel_add(conn, request.form, _actor())
+    _flash(r)
+    if not r.ok:
+        return redirect(url_for("admin.notifications", open=f"new-{request.form.get('kind')}") + "#new")
+    return redirect(url_for("admin.notifications", open=r.data["id"]) + f"#ch-{r.data['id']}")
 
 
 @bp.post("/settings/channels/<int:cid>")
 def channel_save(cid: int):
-    form = request.form
     with db.get_conn() as conn:
-        c = _channel_or_404(conn, cid)
-        if form.get("delete"):
-            db.execute(conn, "DELETE FROM channels WHERE id = %s", (cid,))
-            settings.save(conn, {settings.channel_url_key(cid): None, settings.channel_token_key(cid): None},
-                          _actor(), record=False)
-            settings.history_add(conn, _actor(), f"Removed channel {c['name']}")
-            flash(f"{c['name']} removed, with its queued messages.", "ok")
-            return redirect(url_for("admin.notifications") + "#channels")
-        if form.get("toggle"):
-            db.execute(conn, "UPDATE channels SET enabled = NOT enabled WHERE id = %s", (cid,))
-            settings.history_add(conn, _actor(), f"{c['name']}: switched {'off' if c['enabled'] else 'on'}")
-            flash(f"{c['name']} switched {'off' if c['enabled'] else 'on'}.", "ok")
-            return redirect(url_for("admin.notifications") + f"#ch-{cid}")
-        url = form.get("url", "").strip()
-        token = form.get("bot_token", "").strip()
-        slack_channel = form.get("slack_channel", "").strip().upper()
-        if url:
-            problem = _channel_url_problem(c["kind"], url)
-            if problem:
-                flash(problem, "bad")
-                return redirect(url_for("admin.notifications", open=cid) + f"#ch-{cid}")
-            settings.save(conn, {settings.channel_url_key(cid): url, settings.channel_token_key(cid): None}, _actor())
-            db.execute(conn, "UPDATE channels SET slack_channel = '' WHERE id = %s", (cid,))
-        elif c["kind"] == "slack" and (token or slack_channel != c["slack_channel"]):
-            has_token = bool(token) or settings.channel_token_key(cid) in settings.secret_meta(conn)
-            problem = _slack_bot_problem(token or "xoxb-kept", slack_channel) if has_token else \
-                "Enter the bot token too, or a webhook URL instead."
-            if problem:
-                flash(problem, "bad")
-                return redirect(url_for("admin.notifications", open=cid) + f"#ch-{cid}")
-            if token:
-                settings.save(conn, {settings.channel_token_key(cid): token, settings.channel_url_key(cid): None},
-                              _actor())
-            db.execute(conn, "UPDATE channels SET slack_channel = %s WHERE id = %s", (slack_channel, cid))
-        repos = settings.join_list(settings.split_list(form.get("repos", "")))
-        teams = settings.join_list(t.lower().lstrip("@") for t in settings.split_list(form.get("teams", "")))
-        name = form.get("name", "").strip() or c["name"]
-        db.execute(conn, "UPDATE channels SET name = %s, repos = %s, teams = %s WHERE id = %s",
-                   (name, repos, teams, cid))
-        if (name, repos, teams) != (c["name"], c["repos"], c["teams"]):
-            settings.history_add(conn, _actor(), f"Channel {name}: repos [{repos or 'all'}], teams [{teams or 'none'}]")
-    flash(f"{name} saved.", "ok")
+        r = actions.channel_update(conn, cid, request.form, _actor())
+    if r.status == 404:
+        abort(404)
+    _flash(r)
+    if request.form.get("delete") and r.ok:
+        return redirect(url_for("admin.notifications") + "#channels")
+    if request.form.get("toggle"):
+        return redirect(url_for("admin.notifications") + f"#ch-{cid}")
     return redirect(url_for("admin.notifications", open=cid) + f"#ch-{cid}")
 
 
 @bp.post("/settings/channels/<int:cid>/test")
 def channel_test(cid: int):
     with db.get_conn() as conn:
-        c = _channel_or_404(conn, cid)
-        values = settings.load(conn)
-        login = None
-        person = db.one(conn, "SELECT login FROM people WHERE teams_id <> '' OR slack_id <> '' LIMIT 1")
-        if person:
-            login = person["login"]
-        msg = {"heading": "Test from Branchwarden", "tone": "info",
-               "text": f"Sent by {_actor()} from Settings › Channels and reminders, to check this channel works."
-                       + (f" Mention check: @{{{login}}}" if login else ""),
-               "facts": [["Channel", c["name"]], ["Kind", "Teams Adaptive Card" if c["kind"] == "teams" else "Slack Block Kit"]],
-               "buttons": [["Open Branchwarden", (settings.get(values, "PUBLIC_URL") or request.url_root).rstrip("/")]]}
-        started = time.monotonic()
-        try:
-            notify.send(conn, c, msg)
-            took = time.monotonic() - started
-            flash(f"Test sent and accepted ({took * 1000:.0f} ms).", "ok")
-        except (notify.PermanentFailure, notify.RetryLater) as exc:
-            flash(f"The test failed: {exc}.", "bad")
+        public = (settings.get(settings.load(conn), "PUBLIC_URL") or request.url_root).rstrip("/")
+        r = actions.channel_test(conn, cid, _actor(), public)
+    if r.status == 404:
+        abort(404)
+    _flash(r)
     return redirect(url_for("admin.notifications", open=cid) + f"#ch-{cid}")
-
-
-HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
 @bp.post("/settings/workhours")
 def workhours():
-    form = request.form
-    days = [d for d in analysis.DAYS if form.get(f"day_{d}")]
-    start, end, tz = form.get("WORK_START", ""), form.get("WORK_END", ""), form.get("WORK_TZ", "").strip()
-    if not days or not HHMM.match(start) or not HHMM.match(end) or start >= end:
-        flash("Pick at least one day, and a start time before the end time (HH:MM).", "bad")
-        return redirect(url_for("admin.notifications") + "#hours")
-    try:
-        from zoneinfo import ZoneInfo
-        ZoneInfo(tz)
-    except Exception:
-        flash(f"{tz} isn't a time zone name like Europe/London.", "bad")
-        return redirect(url_for("admin.notifications") + "#hours")
     with db.get_conn() as conn:
-        _saved(settings.save(conn, {"WORK_DAYS": ",".join(days), "WORK_START": start, "WORK_END": end,
-                                    "WORK_TZ": tz}, _actor()))
+        _flash(actions.work_hours(conn, request.form, _actor()))
     return redirect(url_for("admin.notifications") + "#hours")
-
-
-def _num(raw: str, lo: float, hi: float) -> Optional[float]:
-    try:
-        v = float(raw)
-    except (TypeError, ValueError):
-        return None
-    return v if lo <= v <= hi else None
 
 
 @bp.post("/settings/rules/<key>")
 def rule_save(key: str):
-    rule = rules.RULE_BY_KEY.get(key)
-    if not rule:
-        abort(404)
-    form = request.form
     with db.get_conn() as conn:
-        current = rules.load(conn)[key]
-        if form.get("toggle"):
-            db.execute(conn, "UPDATE rules SET enabled = NOT enabled, updated_at = NOW() WHERE key = %s", (key,))
-            settings.history_add(conn, _actor(), f"Rule {rule.name}: switched {'off' if current['enabled'] else 'on'}")
-            flash(f"{rule.name} switched {'off' if current['enabled'] else 'on'}.", "ok")
-            return redirect(url_for("admin.notifications") + f"#rule-{key}")
-        if form.get("send_now") and key == "mvp":
-            n = rules.run_mvp_post(conn, settings.load(conn), force=True)
-            flash(f"MVP post queued for {n} channel{'s' if n != 1 else ''}." if n
-                  else "Nothing to post: no reviews, merges, prunes or new PRs in the last 7 days, or no channels.",
-                  "ok" if n else "info")
-            return redirect(url_for("admin.notifications") + f"#rule-{key}")
-        if form.get("send_now") and key == "digest":
-            n = rules.run_digest(conn, settings.load(conn), force=True)
-            flash(f"Digest queued for {n} channel{'s' if n != 1 else ''}." if n
-                  else "Nothing to put in a digest: no stale or left-behind branches in any channel's repos.",
-                  "ok" if n else "info")
-            return redirect(url_for("admin.notifications") + f"#rule-{key}")
-        p = dict(current["params"])
-        target = form.get("target", "routed")
-        if target in ("routed", "all") or (target.isdigit() and db.one(conn, "SELECT 1 AS x FROM channels WHERE id = %s",
-                                                                        (int(target),))):
-            p["target"] = target
-        p["mention"] = bool(form.get("mention"))
-        if rule.kind == "reminder":
-            after, repeat, mx = _num(form.get("after"), 0, 10000), _num(form.get("repeat"), 0.1, 10000), _num(form.get("max"), 1, 50)
-            if after is None or repeat is None or mx is None or form.get("unit") not in dict(rules.UNITS):
-                flash("Use numbers for the wait, the repeat and the maximum.", "bad")
-                return redirect(url_for("admin.notifications", open=key) + f"#rule-{key}")
-            p.update(after=metrics_compact(after), repeat=metrics_compact(repeat), max=int(mx), unit=form["unit"],
-                     skip_label=form.get("skip_label", "").strip(), group=bool(form.get("group")))
-        elif rule.kind == "assign":
-            after, count = _num(form.get("after"), 0, 10000), _num(form.get("count"), 1, 5)
-            if after is None or count is None or form.get("unit") not in dict(rules.UNITS):
-                flash("Use a number for the wait, and 1 to 5 reviewers.", "bad")
-                return redirect(url_for("admin.notifications", open=key) + f"#rule-{key}")
-            p.update(after=metrics_compact(after), unit=form["unit"], count=int(count), codeowners=bool(form.get("codeowners")),
-                     pool=settings.join_list(e.lower().lstrip("@") for e in settings.split_list(form.get("pool", ""))),
-                     repos=settings.join_list(settings.split_list(form.get("repos", ""))),
-                     skip_label=form.get("skip_label", "").strip())
-        elif key == "wf_failed":
-            if form.get("scope") in dict(rules.WF_SCOPES):
-                p["scope"] = form["scope"]
-            p["fixed"] = bool(form.get("fixed"))
-        elif rule.kind in ("digest", "post"):
-            if form.get("day") not in analysis.DAYS or not HHMM.match(form.get("time", "")):
-                flash("Pick a day and a time (HH:MM).", "bad")
-                return redirect(url_for("admin.notifications", open=key) + f"#rule-{key}")
-            p.update(day=form["day"], time=form["time"])
-        db.execute(conn, "UPDATE rules SET params = %s, updated_at = NOW() WHERE key = %s", (Json(p), key))
-        settings.history_add(conn, _actor(), f"Rule {rule.name}: settings changed")
-    flash(f"{rule.name} saved.", "ok")
+        r = actions.rule_update(conn, key, request.form, _actor())
+    if r.status == 404:
+        abort(404)
+    _flash(r)
+    if not r.ok:
+        return redirect(url_for("admin.notifications", open=key) + f"#rule-{key}")
     return redirect(url_for("admin.notifications") + f"#rule-{key}")
 
 
@@ -843,42 +542,11 @@ def people():
                            matched=sum(1 for k in known if k["teams_id"] or k["slack_id"]))
 
 
-SLACK_ID = re.compile(r"^[UW][A-Z0-9]{6,}$")
-
-
 @bp.post("/settings/people")
 def people_save():
-    form = request.form
-    logins = form.getlist("login")
-    changed = 0
-    bad = []
     with db.get_conn() as conn:
-        for i, login in enumerate(logins):
-            login = login.strip().lower()
-            if not LOGIN.match(login.replace("[bot]", "")):
-                continue
-            name = form.getlist("name")[i].strip()
-            teams_id = form.getlist("teams_id")[i].strip()
-            slack_id = form.getlist("slack_id")[i].strip().upper()
-            if slack_id and not SLACK_ID.match(slack_id):
-                bad.append(login)
-                slack_id = ""
-            old = db.one(conn, "SELECT * FROM people WHERE login = %s", (login,))
-            if old and (old["name"], old["teams_id"], old["slack_id"]) == (name, teams_id, slack_id):
-                continue
-            if not old and not (name or teams_id or slack_id):
-                continue
-            db.execute(conn, """INSERT INTO people (login, name, teams_id, slack_id, updated_at) VALUES (%s, %s, %s, %s, NOW())
-                                ON CONFLICT (login) DO UPDATE SET name = EXCLUDED.name, teams_id = EXCLUDED.teams_id,
-                                    slack_id = EXCLUDED.slack_id, updated_at = NOW()""",
-                       (login, name, teams_id, slack_id))
-            changed += 1
-        if changed:
-            settings.history_add(conn, _actor(), f"People: updated {changed}")
-    if bad:
-        flash(f"Slack member IDs look like U01ABCDEF2 (Profile › ⋮ › Copy member ID); left blank for {', '.join(bad)}.", "bad")
-    flash(f"Saved {changed} {'person' if changed == 1 else 'people'}." if changed else "Nothing changed.",
-          "ok" if changed else "info")
+        r = actions.people_save(conn, request.form, _actor())
+    _flash(r)
     return redirect(url_for("admin.people", q=request.args.get("q", "")))
 
 
@@ -908,49 +576,16 @@ def tls_save():
     if not tls.enabled():
         abort(400, "TLS is switched off (BRANCHWARDEN_TLS=off).")
     form = request.form
-    if form.get("restore"):
-        ok = tls.restore_previous()
-        flash("The previous certificate is back. The dashboard reloads it in a few seconds."
-              if ok else "There's no previous certificate.", "ok" if ok else "info")
-        with db.get_conn() as conn:
-            settings.history_add(conn, _actor(), "TLS: restored the previous certificate")
-        return redirect(url_for("admin.tls_page"))
-    if form.get("self_signed"):
-        cert, key = tls.make_self_signed()
-    else:
-        cert, key = _pem_field("cert"), _pem_field("key")
-        chain = _pem_field("chain")
-        if chain:
-            cert = cert.rstrip() + b"\n" + chain.strip() + b"\n"
-        problem = tls.check(cert, key)
-        if problem:
-            flash(problem + " Nothing was changed.", "bad")
-            return redirect(url_for("admin.tls_page"))
-    tls.install(cert, key)
-    info = tls.describe(cert)
     with db.get_conn() as conn:
-        settings.history_add(conn, _actor(), f"TLS: installed {'a new self-signed' if form.get('self_signed') else 'an uploaded'} "
-                             f"certificate ({info['fingerprint'][:23]}…)")
-    flash("Certificate installed. The dashboard reloads it in a few seconds: reload this page then. "
-          "If it doesn't come back, restore the previous one from the log's instructions or the certs volume.", "ok")
+        _flash(actions.tls_install(conn, _pem_field("cert"), _pem_field("key"), _pem_field("chain"), _actor(),
+                                   self_signed=bool(form.get("self_signed")), restore=bool(form.get("restore"))))
     return redirect(url_for("admin.tls_page"))
 
 
 @bp.post("/settings/github-login")
 def github_login_save():
-    form = request.form
-    changes = {"GITHUB_LOGIN_ENABLED": "true" if form.get("GITHUB_LOGIN_ENABLED") else "false",
-               "GITHUB_OAUTH_CLIENT_ID": form.get("GITHUB_OAUTH_CLIENT_ID", "").strip()}
-    if form.get("GITHUB_OAUTH_CLIENT_SECRET", "").strip():
-        changes["GITHUB_OAUTH_CLIENT_SECRET"] = form["GITHUB_OAUTH_CLIENT_SECRET"].strip()
-    for role in settings.ROLES:
-        key = f"GITHUB_ROLE_{role.upper()}"
-        changes[key] = settings.join_list(e.lower().lstrip("@") for e in settings.split_list(form.get(key, "")))
-    if changes["GITHUB_LOGIN_ENABLED"] == "true" and not any(changes[f"GITHUB_ROLE_{r.upper()}"] for r in settings.ROLES):
-        flash("Name at least one team, organisation or login in the role lists, or nobody could sign in with GitHub.", "bad")
-        return redirect(url_for("admin.users") + "#github")
     with db.get_conn() as conn:
-        _saved(settings.save(conn, changes, _actor()))
+        _flash(actions.github_login_settings(conn, request.form, _actor()))
     return redirect(url_for("admin.users") + "#github")
 
 
@@ -962,10 +597,11 @@ def _link(token: str) -> str:
 
 @bp.get("/settings/users")
 def users(new_link: Optional[dict] = None, error: Optional[str] = None, adding: bool = False,
-          form: Optional[dict] = None):
+          form: Optional[dict] = None, new_token: Optional[dict] = None):
     with db.get_conn() as conn:
         people_rows = settings.users(conn)
         history = settings.history(conn)
+        service_tokens = apitokens.service(conn)
     now = datetime.now(timezone.utc)
     for p in people_rows:
         if p["active"]:
@@ -986,58 +622,67 @@ def users(new_link: Optional[dict] = None, error: Optional[str] = None, adding: 
           "roles": {r: settings.get(values, f"GITHUB_ROLE_{r.upper()}") for r in settings.ROLES}}
     return render_template("settings_users.html", people=people_rows, history=history, new_link=new_link,
                            error=error, adding=adding or request.args.get("add") == "1", form=form or {},
-                           roles=settings.ROLES, gh=gh)
+                           roles=settings.ROLES, gh=gh, service_tokens=service_tokens, new_token=new_token)
+
+
+@bp.post("/settings/service-tokens")
+def service_token_create():
+    form = request.form
+    role = form.get("role", "")
+    if role not in settings.ROLES:
+        return users(error="Pick a role for the service token.")
+    with db.get_conn() as conn:
+        row, token = apitokens.create(conn, form.get("name", ""), form.get("scope", "write"), _actor(), role=role,
+                                      expires_days=form.get("expires_days", type=int))
+    if not row:
+        return users(error=token)
+    return users(new_token={"name": row["name"], "token": token})
+
+
+@bp.post("/settings/service-tokens/<int:token_id>/revoke")
+def service_token_revoke(token_id: int):
+    with db.get_conn() as conn:
+        done = apitokens.revoke(conn, token_id, _actor())
+    flash("Service token revoked." if done else "No such service token.", "ok" if done else "bad")
+    return redirect(url_for("admin.users") + "#service-tokens")
 
 
 @bp.post("/settings/users/new")
 def user_new():
     form = request.form
-    name, email, role = form.get("name", "").strip(), form.get("email", "").strip(), form.get("role")
-    if not name or "@" not in email or role not in settings.ROLES:
-        return users(error="Enter a name, an email and a role.", adding=True, form=form)
     with db.get_conn() as conn:
-        try:
-            new = settings.create_user(conn, email, name, role, _actor())
-        except psycopg2.errors.UniqueViolation:
-            conn.rollback()
-            return users(error=f"There's already an account for {email}.", adding=True, form=form)
-    return users(new_link={"name": name, "role": role, "url": _link(new.token)})
+        r = actions.user_add(conn, form.get("name", ""), form.get("email", ""), form.get("role", ""), _actor())
+    if not r.ok:
+        return users(error=r.message, adding=True, form=form)
+    return users(new_link={"name": form.get("name", "").strip(), "role": form.get("role"), "url": _link(r.data["token"])})
 
 
 @bp.post("/settings/users/<int:user_id>/role")
 def user_role(user_id: int):
-    if user_id == g.user["id"]:
-        return users(error="You can't change your own role. Ask another admin.")
     with db.get_conn() as conn:
-        target = settings.user(conn, user_id)
-        if target and target["via_github"]:
-            return users(error=f"{target['name']}'s role comes from their GitHub teams: change the role lists instead.")
-        problem = settings.set_role(conn, user_id, request.form.get("role", ""), _actor())
-    if problem:
-        return users(error=problem)
-    flash("Role changed.", "ok")
+        r = actions.user_role(conn, g.user["id"], user_id, request.form.get("role", ""), _actor())
+    if not r.ok:
+        return users(error=r.message)
+    flash(r.message, "ok")
     return redirect(url_for("admin.users"))
 
 
 @bp.post("/settings/users/<int:user_id>/link")
 def user_link(user_id: int):
     with db.get_conn() as conn:
-        person = settings.user(conn, user_id)
-        if not person:
-            abort(404)
-        if person["via_github"]:
-            return users(error=f"{person['name']} signs in with GitHub, so has no password to set.")
-        new = settings.new_setup_link(conn, user_id, _actor())
-    return users(new_link={"name": person["name"], "role": person["role"], "url": _link(new.token)})
+        r = actions.user_link(conn, user_id, _actor())
+    if r.status == 404:
+        abort(404)
+    if not r.ok:
+        return users(error=r.message)
+    return users(new_link={"name": r.data["name"], "role": r.data["role"], "url": _link(r.data["token"])})
 
 
 @bp.post("/settings/users/<int:user_id>/delete")
 def user_delete(user_id: int):
-    if user_id == g.user["id"]:
-        return users(error="You can't remove your own account.")
     with db.get_conn() as conn:
-        problem = settings.delete_user(conn, user_id, _actor())
-    if problem:
-        return users(error=problem)
-    flash("Account removed. They're signed out on their next click.", "ok")
+        r = actions.user_delete(conn, g.user["id"], user_id, _actor())
+    if not r.ok:
+        return users(error=r.message)
+    flash(r.message, "ok")
     return redirect(url_for("admin.users"))

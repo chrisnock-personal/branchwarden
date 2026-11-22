@@ -284,7 +284,8 @@ def test_every_page_renders_with_demo_data(db_url):
         skip = {"admin.logout", "admin.login", "admin.setup", "admin.welcome", "admin.github_login",
                 "admin.github_callback", "healthz", "static", "deliveries"}
         paths = sorted({r.rule for r in app.url_map.iter_rules()
-                        if "GET" in r.methods and not r.arguments and r.endpoint not in skip})
+                        if "GET" in r.methods and not r.arguments and r.endpoint not in skip
+                        and not r.endpoint.startswith("api.")})      # the API has its own tests (test_api.py)
         assert "/repos" in paths and "/workflows" in paths and "/settings/github" in paths
         pr = db.one(conn, "SELECT id FROM pull_requests WHERE state = 'open' ORDER BY id LIMIT 1")["id"]
         paths += ["/repos/demo-org/billing-api", f"/pulls?assign={pr}", "/pulls?state=stalled", "/branches?tab=left",

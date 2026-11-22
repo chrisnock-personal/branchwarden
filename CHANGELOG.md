@@ -4,6 +4,25 @@ All notable changes to Branchwarden. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **A JSON API** (#18) under `/api/v1`: overview, pull requests (with
+  filters), branches, repositories, workflows, My work, metrics and MVP;
+  requesting reviewers (with a dry run), snoozing, ignoring branches and
+  scans; and the admin settings, channels, rules, people, users and TLS.
+  An OpenAPI document at `/api/v1/openapi.json`, and `docs/api.md`.
+- **API tokens:** personal ones under your name › API tokens, acting with your
+  role (or read-only), and service tokens with their own role under Settings ›
+  Users and access. Shown once and stored as a hash; optional expiry; last
+  used; a rate limit; changes recorded in the history with the token named.
+
+### Changed
+
+- One access rule (`access.py`) and one set of actions (`actions.py`) now
+  serve both the dashboard and the API, so the two can't drift apart.
+
 ## [0.4.1] - 2026-11-22
 
 ### Added

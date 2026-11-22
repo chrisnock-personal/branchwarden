@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import os
 import time
 from datetime import datetime, timedelta, timezone
@@ -31,6 +30,9 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv()
 
+import access  # noqa: E402
+import apitokens  # noqa: E402
+import actions  # noqa: E402
 import analysis  # noqa: E402
 import data  # noqa: E402
 import db  # noqa: E402
@@ -44,6 +46,7 @@ from version import VERSION  # noqa: E402
 import settings  # noqa: E402
 import workflows  # noqa: E402
 from admin import bp as admin_bp  # noqa: E402
+from api import bp as api_bp, error as api_error  # noqa: E402
 from github import Connections, GitHubError, verify_signature  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-7s  %(message)s",
@@ -81,6 +84,7 @@ def _security_headers(resp):
 
 
 app.register_blueprint(admin_bp)
+app.register_blueprint(api_bp)
 
 ORG_CACHE_SECONDS = 3600
 WEBHOOK_EVENTS = {"pull_request", "pull_request_review", "pull_request_review_comment", "check_suite",
@@ -88,7 +92,7 @@ WEBHOOK_EVENTS = {"pull_request", "pull_request_review", "pull_request_review_co
 
 
 def can_act() -> bool:
-    return bool(g.get("user")) and g.user["role"] in ("admin", "member")
+    return bool(g.get("user")) and access.allowed(g.user["role"], "act")
 
 
 def _reviews_waiting() -> Optional[int]:
@@ -174,6 +178,8 @@ ERRORS = {400: ("Something was wrong with that request", None), 403: ("Not allow
 @app.errorhandler(405)
 def _error(exc):
     title, message = ERRORS.get(exc.code, ("Something went wrong", None))
+    if request.path.startswith("/api/"):
+        return api_error(exc.code, None, "No such endpoint." if exc.code == 404 else (message or title))
     if request.path.startswith("/github/"):
         return {"error": title}, exc.code
     return render_template("error.html", code=exc.code, title=title,
@@ -420,84 +426,29 @@ def assign_reviewers(pr_id: int):
         abort(403)
     chosen = set(request.form.getlist("who"))
     shown = set(request.form.getlist("shown"))
-    tell = bool(request.form.get("tell"))
     with db.get_conn() as conn:
-        values = settings.load(conn)
-        found = data.open_prs(conn, pr_id=pr_id)
-        if not found:
-            abort(404)
-        pr = found[0]
-        current = {f"u:{u}" for u in pr["requested_users"]} | {f"t:{t}" for t in pr["requested_teams"]}
-        add = chosen - current
-        remove = (current & shown) - chosen
-        split = lambda items, p: sorted(x[2:] for x in items if x.startswith(p))  # noqa: E731
-        try:
-            client = Connections(values).client_for(pr["target_login"], pr["target_via"])
-            if add:
-                client.request_reviewers(pr["full_name"], pr["number"], split(add, "u:"), split(add, "t:"))
-            if remove:
-                client.remove_reviewers(pr["full_name"], pr["number"], split(remove, "u:"), split(remove, "t:"))
-        except GitHubError as exc:
-            flash(f"GitHub refused the change: {exc}", "bad")
-            return redirect(url_for("pulls", assign=pr_id))
-        if not add and not remove:
-            flash("Nothing changed.", "info")
-            return redirect(url_for("pulls", assign=pr_id))
-        new = [x for x in pr["requested"] if f"u:{x.get('user')}" not in remove and f"t:{x.get('team')}" not in remove]
-        new += [{"user": x[2:]} if x.startswith("u:") else {"team": x[2:]} for x in sorted(add)]
-        db.execute(conn, "UPDATE pull_requests SET requested = %s, review_requested_at = NOW() WHERE id = %s",
-                   (Json(new), pr_id))
-        db.request_scan(conn, pr["full_name"], "reviewers changed")
-        actor = g.user["name"]
-        for x in sorted(add):
-            db.execute(conn, "INSERT INTO assignments (pr_id, reviewer, by_rule, by_name) VALUES (%s, %s, FALSE, %s)",
-                       (pr_id, x[2:], actor))
-        settings.history_add(conn, actor, f"{pr['full_name']} #{pr['number']}: requested review from "
-                             f"{', '.join(split(add, 'u:') + split(add, 't:')) or 'nobody new'}"
-                             + (f"; removed {', '.join(split(remove, 'u:') + split(remove, 't:'))}" if remove else ""))
-        names = split(add, "u:") + split(add, "t:")
-        if tell and add:
-            pr = data.enrich_pr({**pr, "requested": new}, datetime.now(timezone.utc))
-            msg = {"heading": f"Review requested by {actor}", "tone": "info", "title": pr["title"],
-                   "title_url": pr["url"], "facts": rules._facts(pr), "pr": pr["ref"],
-                   "text": f"{', '.join(f'@{{{u}}}' for u in split(add, 'u:'))}"
-                           f"{', ' if split(add, 'u:') and split(add, 't:') else ''}"
-                           f"{', '.join(split(add, 't:'))}: please review this.",
-                   "buttons": rules._buttons(pr, values)}
-            chans = notify.channels_for(conn, "routed", pr["full_name"], pr["requested_teams"])
-            notify.enqueue(conn, chans, "assigned", msg, pr_id)
-            told = f" A notice went to {', '.join(c['name'] for c in chans)}." if chans else \
-                " No channel is routed for this repo, so no notice went out."
-        else:
-            told = ""
-    what = f"Review requested on GitHub from {', '.join(names)}." if names else "Reviewers removed on GitHub."
-    flash(what + told, "ok")
+        r = actions.reviewers(conn, settings.load(conn), pr_id, add=chosen, remove=shown - chosen,
+                              actor=g.user["name"], tell=bool(request.form.get("tell")))
+    if r.status == 404:
+        abort(404)
+    flash(r.message, r.tone)
+    if not r.ok or r.tone == "info":
+        return redirect(url_for("pulls", assign=pr_id))
     return redirect(url_for("pulls", **{k: v for k, v in request.args.items() if k != "assign"}))
 
 
-SNOOZE_DAYS = (1, 3, 7)
+SNOOZE_DAYS = actions.SNOOZE_DAYS
 
 
 @app.post("/pulls/<int:pr_id>/snooze")
 def snooze(pr_id: int):
     if not can_act():
         abort(403)
-    days = request.form.get("days", type=int)
     with db.get_conn() as conn:
-        pr = db.one(conn, "SELECT p.number, r.full_name FROM pull_requests p JOIN repos r ON r.id = p.repo_id "
-                          "WHERE p.id = %s AND p.state = 'open'", (pr_id,))
-        if not pr:
-            abort(404)
-        if days in SNOOZE_DAYS:
-            until = datetime.now(timezone.utc) + timedelta(days=days)
-            db.execute(conn, """INSERT INTO snoozes (pr_id, until, by_name) VALUES (%s, %s, %s)
-                                ON CONFLICT (pr_id) DO UPDATE SET until = EXCLUDED.until, by_name = EXCLUDED.by_name,
-                                    at = NOW()""", (pr_id, until, g.user["name"]))
-            settings.history_add(conn, g.user["name"], f"{pr['full_name']} #{pr['number']}: reminders snoozed for {days} day{'s' if days != 1 else ''}")
-            flash(f"No reminders about this PR until {until:%a %d %b %H:%M} UTC.", "ok")
-        else:
-            db.execute(conn, "DELETE FROM snoozes WHERE pr_id = %s", (pr_id,))
-            flash("Reminders about this PR are back on.", "ok")
+        r = actions.snooze(conn, pr_id, request.form.get("days", type=int), g.user["name"])
+    if r.status == 404:
+        abort(404)
+    flash(r.message, r.tone)
     return redirect(url_for("pulls", **{k: v for k, v in request.args.items()}) + "#snooze")
 
 
@@ -581,16 +532,39 @@ def my_work():
 
 @app.post("/me/login")
 def my_login():
-    if g.user.get("via_github"):
-        abort(400, "Your GitHub login comes from signing in with GitHub.")
-    login = request.form.get("login", "").strip().lstrip("@")
-    if login and not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})", login):
-        flash("That isn't a GitHub login.", "bad")
-        return redirect(url_for("my_work"))
     with db.get_conn() as conn:
-        settings.set_my_login(conn, g.user["id"], login)
-    flash(f"My work now follows {login}." if login else "GitHub login removed.", "ok")
+        r = actions.set_my_login(conn, g.user, request.form.get("login", ""))
+    flash(r.message, r.tone)
     return redirect(url_for("my_work"))
+
+
+# ─── API tokens ─────────────────────────────────────────────────────────────
+
+@app.get("/me/tokens")
+def my_tokens(new_token: Optional[dict] = None):
+    with db.get_conn() as conn:
+        tokens = apitokens.mine(conn, g.user["id"])
+    return render_template("tokens.html", tokens=tokens, new_token=new_token)
+
+
+@app.post("/me/tokens")
+def token_create():
+    days = request.form.get("expires_days", type=int)
+    with db.get_conn() as conn:
+        row, token = apitokens.create(conn, request.form.get("name", ""), request.form.get("scope", "write"),
+                                      g.user["name"], user_id=g.user["id"], expires_days=days)
+    if not row:
+        flash(token, "bad")
+        return redirect(url_for("my_tokens"))
+    return my_tokens(new_token={"name": row["name"], "token": token})
+
+
+@app.post("/me/tokens/<int:token_id>/revoke")
+def token_revoke(token_id: int):
+    with db.get_conn() as conn:
+        done = apitokens.revoke(conn, token_id, g.user["name"], user_id=g.user["id"])
+    flash("Token revoked: it stops working straight away." if done else "No such token of yours.", "ok" if done else "bad")
+    return redirect(url_for("my_tokens"))
 
 
 # ─── MVP ────────────────────────────────────────────────────────────────────
@@ -653,14 +627,10 @@ def ignore_branch(branch_id: int):
     if not can_act():
         abort(403)
     with db.get_conn() as conn:
-        b = db.one(conn, """SELECT b.repo_id, b.name, r.full_name FROM branches b JOIN repos r ON r.id = b.repo_id
-                             WHERE b.id = %s""", (branch_id,))
-        if not b:
-            abort(404)
-        db.execute(conn, """INSERT INTO ignored_branches (repo_id, name, ignored_by) VALUES (%s, %s, %s)
-                            ON CONFLICT DO NOTHING""", (b["repo_id"], b["name"], g.user["name"]))
-        settings.history_add(conn, g.user["name"], f"Stopped flagging {b['full_name']}:{b['name']}")
-    flash(f"{b['name']} won't be flagged again. It's listed under Ignored branches if you change your mind.", "ok")
+        r = actions.ignore_branch(conn, branch_id, g.user["name"])
+    if r.status == 404:
+        abort(404)
+    flash(r.message, r.tone)
     return redirect(request.form.get("back") or url_for("branches"))
 
 
@@ -669,9 +639,8 @@ def unignore_branch(repo_id: int, name: str):
     if not can_act():
         abort(403)
     with db.get_conn() as conn:
-        db.execute(conn, "DELETE FROM ignored_branches WHERE repo_id = %s AND name = %s", (repo_id, name))
-        settings.history_add(conn, g.user["name"], f"Flagging branch {name} again")
-    flash(f"{name} is flagged again when it's stale or left behind.", "ok")
+        r = actions.unignore_branch(conn, repo_id, name, g.user["name"])
+    flash(r.message, r.tone if r.ok else "info")
     return redirect(url_for("branches", show="ignored") + "#ignored")
 
 
@@ -688,8 +657,8 @@ def scan_now():
     if not can_act():
         abort(403)
     with db.get_conn() as conn:
-        db.request_scan(conn, "*", f"asked for by {g.user['name']}")
-    flash("A full scan starts within a few seconds. Reload in a minute to see the results.", "ok")
+        r = actions.scan(conn, g.user["name"])
+    flash(r.message, r.tone)
     return redirect(request.form.get("back") or url_for("index"))
 
 

@@ -264,12 +264,41 @@ GitHub Enterprise Server works too: set the API address to `https://host/api/v3`
 a Slack member ID, so @mentions reach the right person. Anyone without a match
 appears as a bold name.
 
+## API
+
+Everything the dashboard shows or does is also a JSON API under `/api/v1`, for
+scripts, CI and AI agents (the [reference](docs/api.md), and the OpenAPI
+document at `/api/v1/openapi.json`).
+
+- **Tokens:** each person makes their own under their name › *API tokens*,
+  read-only or read and write, with an optional expiry. A token acts with
+  its owner's role as it is at each request, so changing someone's role
+  changes what their tokens can do. Admins can also make **service tokens**
+  with a role of their own (*Settings › Users and access*). A token is shown
+  once; only its hash is kept, with when it was last used.
+- **The same rules as the dashboard:** one check decides what a viewer, member
+  or admin may do in both, and every change goes through the same code, with
+  the same validation and the same entry in the change history, naming the
+  token. CI calls every endpoint as each role and checks it's allowed or
+  refused exactly as its page is.
+- **Safe by default:** bearer tokens only (cookies don't work on the API, so
+  there's nothing for a cross-site form to use), HTTPS only, a rate limit per
+  token, and secrets stay write-only, as in the dashboard. Requesting
+  reviewers takes `dry_run` to see what would be sent to GitHub.
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" https://branchwarden.example.com/api/v1/my-work
+curl -s -H "Authorization: Bearer $TOKEN" 'https://branchwarden.example.com/api/v1/pulls?filter=stalled&repo=api-*'
+```
+
 ## Roles
 
 | Role | Can |
 |---|---|
 | Admin | Everything: GitHub connections, channels and rules, people, the TLS certificate, users |
 | Member | What viewers can, plus request reviewers, snooze reminders, ignore branches and start a scan |
+
+Everyone can make their own API tokens, which act with their role (or less, if read-only).
 | Viewer | Read the overview, pull requests, branches, repositories, workflows, metrics and MVP, and their own My work |
 
 People are added under *Settings › Users and access*. Each gets a one-time setup
@@ -449,6 +478,10 @@ Two GitHub Actions workflows, both in `.github/workflows/`:
   - the integration tests, against a Postgres service container: the scanner
     end to end with a stand-in for GitHub, routing and the delivery queue,
     workflows, skipping unchanged repos, the demo data, and every page,
+  - the API tests: every endpoint called as each role and with a read-only
+    token, tokens' life cycle, and the main calls end to end; plus checks
+    that the OpenAPI document is valid and matches the routes, and that
+    `docs/api.md` is current,
   - the browser test, in Chromium: first-run setup, every section, a repo
     page, filters, a workflow row, the theme switch, a form and the menu,
   - `pip-audit` for known vulnerabilities in the pinned dependencies,
@@ -508,6 +541,9 @@ The files:
 | `settings.py` | Encrypted settings, users and history |
 | `tls.py` | Certificates |
 | `worker.py` | The loop |
+| `access.py` | Who may do what: one rule for the dashboard and the API |
+| `actions.py` | Every change, shared by the dashboard's forms and the API |
+| `api.py`, `apitokens.py` | The JSON API and its OpenAPI document; API tokens |
 | `demo.py` | Loading and removing the demo data |
 | `healthcheck.py` | Container health checks, and the worker's heartbeat |
 | `deploy/quadlet/` | Podman quadlet files, to run as systemd services |

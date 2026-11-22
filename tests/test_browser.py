@@ -17,7 +17,7 @@ pytestmark = pytest.mark.skipif(os.getenv("BROWSER_TESTS") != "1", reason="set B
 
 
 @pytest.fixture
-def server(db_url):
+def server(db_url, monkeypatch):
     from werkzeug.serving import make_server
 
     import admin
@@ -30,6 +30,7 @@ def server(db_url):
     app = dashboard.app
     app.secret_key = "s" * 32
     app.config["SESSION_COOKIE_SECURE"] = False      # plain HTTP on localhost, for the test only
+    monkeypatch.setenv("BRANCHWARDEN_INSECURE_HTTP", "1")   # likewise for the API
     admin._setup_code.clear()
     srv = make_server("127.0.0.1", 0, app, threaded=True)
     thread = threading.Thread(target=srv.serve_forever, daemon=True)
@@ -95,5 +96,19 @@ def test_setup_sign_in_and_every_section(server):
         page.click("summary.who")
         page.click(".menu >> text=My work")
         expect(page.locator("h1")).to_contain_text("My work")
+
+        # An API token: made on its page, shown once, and it works.
+        page.click("summary.who")
+        page.click(".menu >> text=API tokens")
+        page.fill("#t-name", "Browser test")
+        page.select_option("#t-scope", "read")
+        page.click("button >> text=Make token")
+        token = page.locator("#new-token").inner_text().strip()
+        assert token.startswith("bwt_")
+        me = page.request.get(server + "/api/v1/me", headers={"Authorization": f"Bearer {token}"})
+        assert me.status == 200 and me.json()["scope"] == "read"
+        page.goto(server + "/me/tokens")                 # shown once: not on the page again
+        expect(page.locator("#new-token")).to_have_count(0)
+        expect(page.locator("td", has_text="Browser test")).to_be_visible()
         browser.close()
     assert not errors, errors

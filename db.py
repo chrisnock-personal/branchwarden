@@ -25,6 +25,7 @@ daily            – one row a day of headline counts, for the trend charts
 branch_deletions – branches that went, and who deleted them when a webhook said so
 workflows        – each repo's GitHub Actions workflows, with their triggers and cron schedules
 workflow_runs    – their runs, kept for RETAIN_LOG_DAYS
+api_tokens       – personal and service tokens for the API, as hashes
 settings, users, settings_log – see settings.py
 """
 
@@ -352,6 +353,23 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
 CREATE INDEX IF NOT EXISTS idx_workflow_runs_wf ON workflow_runs (workflow_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_workflow_runs_repo ON workflow_runs (repo_id, created_at);
 
+-- API tokens (see apitokens.py): personal ones act with their owner's role,
+-- service tokens (no owner) with the role an admin gave them. Only a hash is kept.
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id              SERIAL PRIMARY KEY,
+    user_id         INTEGER,                       -- the owner; NULL for a service token
+    name            TEXT NOT NULL,
+    role            TEXT CHECK (role IN ('admin', 'member', 'viewer')),   -- service tokens only
+    scope           TEXT NOT NULL DEFAULT 'write' CHECK (scope IN ('read', 'write')),
+    token_hash      TEXT UNIQUE NOT NULL,          -- sha256 of the token
+    prefix          TEXT NOT NULL,                 -- its first characters, to tell tokens apart
+    created_by      TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at      TIMESTAMPTZ,
+    last_used_at    TIMESTAMPTZ,
+    revoked_at      TIMESTAMPTZ
+);
+
 -- Settings edited in the dashboard (see settings.py). Secrets are encrypted.
 CREATE TABLE IF NOT EXISTS settings (
     key             TEXT PRIMARY KEY,
@@ -379,6 +397,10 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS github_login TEXT;
 
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
 ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('admin', 'member', 'viewer'));
+
+DO $$ BEGIN
+    ALTER TABLE api_tokens ADD CONSTRAINT api_tokens_user_fk FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- Who changed what. Secret values are never written here.
 CREATE TABLE IF NOT EXISTS settings_log (

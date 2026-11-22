@@ -1,4 +1,5 @@
 {% extends "settings_base.html" %}
+{% from "_tokens.html" import token_table, new_token_box with context %}
 {% block title %}Users and access · Branchwarden{% endblock %}
 {% block heading %}
 <div>
@@ -119,6 +120,22 @@
       <label class="check"><input type="checkbox" name="GITHUB_LOGIN_ENABLED" value="1" {{ 'checked' if gh.enabled }}> Offer “Sign in with GitHub”</label>
       <div class="end"><button type="submit" class="btn primary">Save</button></div>
     </div>
+  </form>
+</section>
+
+<section class="card panel" id="service-tokens" aria-labelledby="st-h">
+  <div class="panel-head"><h2 id="st-h">Service tokens</h2><span class="hint">for scripts and CI: their own role, not a person's</span></div>
+  {% if new_token %}{{ new_token_box(new_token) }}{% endif %}
+  {{ token_table(service_tokens, service=True) }}
+  <form method="post" action="{{ url_for('admin.service_token_create') }}" class="editor" style="border-top: 1px solid var(--border)">
+    {{ csrf() }}
+    <div class="form-grid">
+      <div class="field"><label for="st-name">What it's for</label><input class="input" id="st-name" name="name" maxlength="80" placeholder="Grafana, nightly report" required></div>
+      <div class="field"><label for="st-role">Role</label><select id="st-role" name="role"><option value="viewer">Viewer</option><option value="member">Member</option><option value="admin">Admin</option></select></div>
+      <div class="field"><label for="st-scope">Access</label><select id="st-scope" name="scope"><option value="read">Read-only</option><option value="write">Read and write</option></select></div>
+      <div class="field"><label for="st-exp">Expires after</label><select id="st-exp" name="expires_days"><option value="90">90 days</option><option value="365" selected>1 year</option><option value="">Never</option></select></div>
+    </div>
+    <div class="actions"><span></span><button class="btn primary" type="submit">Make service token</button></div>
   </form>
 </section>
 

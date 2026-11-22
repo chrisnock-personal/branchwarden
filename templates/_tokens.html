@@ -1,0 +1,27 @@
+{# The token list and the shown-once box: personal tokens and admins' service tokens. #}
+{% macro token_table(items, service=False) %}
+  {% if items %}
+  <div class="scroll"><table style="min-width: 640px">
+    <thead><tr><th>Name</th><th>Token</th><th>Access</th><th>Last used</th><th>Expires</th><th><span class="sr-only">Revoke</span></th></tr></thead>
+    <tbody>{% for t in items %}<tr>
+      <td>{{ t.name }}<div class="hint">made {{ t.created_at.strftime('%d %b %Y') }}{% if t.created_by %} by {{ t.created_by }}{% endif %}</div></td>
+      <td class="mono" style="font-size: 13px">{{ t.prefix }}…</td>
+      <td><span class="badge {{ 'muted' if t.scope == 'read' else 'info' }}">{{ 'Read-only' if t.scope == 'read' else 'Read and write' }}</span>{% if t.role %} <span class="badge muted">{{ t.role|capitalize }}</span>{% endif %}</td>
+      <td class="sub nowrap">{{ (t.last_used_at|ago) ~ ' ago' if t.last_used_at else 'Never' }}</td>
+      <td class="sub nowrap">{{ t.expires_at.strftime('%d %b %Y') if t.expires_at else 'Never' }}</td>
+      <td><form method="post" action="{{ url_for('admin.service_token_revoke', token_id=t.id) if service else url_for('token_revoke', token_id=t.id) }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}">
+        <button class="btn small" type="submit">Revoke</button></form></td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<div class="empty">No tokens yet.</div>{% endif %}
+{% endmacro %}
+{% macro new_token_box(new_token) %}
+  <div class="editor" style="background: var(--surface2)" role="status">
+    <strong>Your new token: {{ new_token.name }}</strong>
+    <div class="link-box">
+      <code id="new-token">{{ new_token.token }}</code>
+      <button type="button" class="btn" data-copy="new-token">Copy</button>
+    </div>
+    <p class="hint">Copy it now: it's shown only once, and Branchwarden keeps only a hash of it. Use it as <span class="mono">Authorization: Bearer …</span>, or with the CLI: <span class="mono">branchwarden login --url {{ request.url_root.rstrip('/') }}</span>.</p>
+  </div>
+{% endmacro %}
