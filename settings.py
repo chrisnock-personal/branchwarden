@@ -66,6 +66,7 @@ DEFAULTS = {
     "RETAIN_LOG_DAYS": ("Keep messages and scans for (days)", "90"),
     "GITHUB_LOGIN_ENABLED": ("Sign in with GitHub", "false"),
     "DEMO_MODE": ("Demo data loaded", "false"),
+    "SLACK_DM_TOKEN": ("Slack bot token for morning messages", ""),
     "GITHUB_OAUTH_CLIENT_ID": ("GitHub sign-in client ID", ""),
     "GITHUB_OAUTH_CLIENT_SECRET": ("GitHub sign-in client secret", ""),
     "GITHUB_ROLE_ADMIN": ("Admins: GitHub teams or logins", ""),
@@ -73,7 +74,8 @@ DEFAULTS = {
     "GITHUB_ROLE_VIEWER": ("Viewers: GitHub teams or logins", ""),
 }
 
-SECRETS = {"GITHUB_APP_PRIVATE_KEY", "GITHUB_WEBHOOK_SECRET", "GITHUB_TOKEN", "GITHUB_OAUTH_CLIENT_SECRET"}
+SECRETS = {"GITHUB_APP_PRIVATE_KEY", "GITHUB_WEBHOOK_SECRET", "GITHUB_TOKEN", "GITHUB_OAUTH_CLIENT_SECRET",
+           "SLACK_DM_TOKEN"}
 
 SCAN_INTERVALS = (("5", "5 minutes"), ("10", "10 minutes"), ("15", "15 minutes"),
                   ("30", "30 minutes"), ("60", "1 hour"))

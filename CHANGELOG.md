@@ -31,6 +31,12 @@ All notable changes to Branchwarden. The format follows
   workflows, repo health flags, and the worker's health (last scan, errors,
   API budget, skipped repos, scans stopped, messages pending and failed).
 
+- **A morning message in Slack** (#13): on working days at a set time, a
+  direct message to each person who's opted in (on My work) with the reviews
+  waiting on them and their PRs needing action; nothing when there's nothing.
+  A Slack bot token in the new rule, the People mapping, a "Send me one now"
+  button, and `PUT /api/v1/my-work/morning`.
+
 ### Changed
 
 - One access rule (`access.py`) and one set of actions (`actions.py`) now

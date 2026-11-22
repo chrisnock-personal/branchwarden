@@ -524,11 +524,23 @@ def workflows_page():
 @app.get("/me")
 def my_work():
     login = (g.user.get("github_login") or "").lower()
-    work = None
+    work = morning = None
     if login:
         with db.get_conn() as conn:
             work = data.my_work(conn, login, settings.load(conn))
-    return render_template("me.html", login=login, w=work, via_github=g.user.get("via_github"))
+            morning = actions.morning_status(conn, login)
+    return render_template("me.html", login=login, w=work, via_github=g.user.get("via_github"), morning=morning)
+
+
+@app.post("/me/morning")
+def my_morning():
+    with db.get_conn() as conn:
+        if request.form.get("test"):
+            r = actions.morning_now(conn, settings.load(conn), g.user.get("github_login") or "")
+        else:
+            r = actions.set_morning(conn, g.user.get("github_login") or "", bool(request.form.get("on")), g.user["name"])
+    flash(r.message, r.tone)
+    return redirect(url_for("my_work") + "#morning")
 
 
 @app.post("/me/login")

@@ -305,6 +305,11 @@ ALTER TABLE repos ADD COLUMN IF NOT EXISTS classic_protection JSONB;   -- the de
 ALTER TABLE repos ADD COLUMN IF NOT EXISTS health JSONB;               -- {protected, reviews, rules}
 ALTER TABLE repos ADD COLUMN IF NOT EXISTS health_at TIMESTAMPTZ;
 
+-- The Slack morning message (rules.run_morning): who wants it, and how the last one went.
+ALTER TABLE people ADD COLUMN IF NOT EXISTS morning BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE people ADD COLUMN IF NOT EXISTS morning_last DATE;
+ALTER TABLE people ADD COLUMN IF NOT EXISTS morning_error TEXT;
+
 -- Ticket keys found in a PR's description (the text itself isn't kept).
 ALTER TABLE pull_requests ADD COLUMN IF NOT EXISTS body_tickets JSONB NOT NULL DEFAULT '[]';
 

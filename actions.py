@@ -528,6 +528,17 @@ def rule_update(conn, key: str, form: Mapping, actor: str) -> Result:
         if get("scope") in dict(rules.WF_SCOPES):
             p["scope"] = get("scope")
         p["fixed"] = box("fixed")
+    elif rule.kind == "dm":
+        if not HHMM.match(str(get("time") or "")):
+            return refused("Give the time as HH:MM, in the working-hours time zone.")
+        p["time"] = get("time")
+        token = str(form.get("slack_token", "") or "").strip()
+        if token:
+            if not token.startswith("xoxb-"):
+                return refused("A Slack bot token starts with xoxb- (OAuth & Permissions › Bot User OAuth Token).")
+            settings.save(conn, {"SLACK_DM_TOKEN": token}, actor)
+        elif _flag(form, "remove_token"):
+            settings.save(conn, {"SLACK_DM_TOKEN": None}, actor)
     elif rule.kind in ("digest", "post"):
         if get("day") not in analysis.DAYS or not HHMM.match(str(get("time") or "")):
             return refused("Pick a day and a time (HH:MM).")
@@ -666,3 +677,40 @@ def user_delete(conn, me: int, user_id: int, actor: str) -> Result:
         return refused("No account with that id.", 404)
     problem = settings.delete_user(conn, user_id, actor)
     return refused(problem, 409) if problem else done("Account removed. They're signed out on their next click.")
+
+
+# ─── The morning message: opting in ─────────────────────────────────────────
+
+def morning_status(conn, login: str) -> dict:
+    p = db.one(conn, "SELECT slack_id, morning, morning_last, morning_error FROM people WHERE login = %s",
+               ((login or "").lower(),))
+    rule = rules.load(conn)["morning"]
+    return {"enabled": bool(p and p["morning"]), "slack_id_set": bool(p and p["slack_id"]),
+            "last_sent": p["morning_last"] if p else None, "error": p["morning_error"] if p else None,
+            "rule_on": rule["enabled"], "time": rule["params"].get("time"),
+            "token_set": "SLACK_DM_TOKEN" in settings.secret_meta(conn)}
+
+
+def set_morning(conn, login: str, enabled: bool, actor: str) -> Result:
+    login = (login or "").lower()
+    if not login:
+        return refused("Give your GitHub login on My work first.", 409)
+    p = db.one(conn, "SELECT slack_id FROM people WHERE login = %s", (login,))
+    if enabled and not (p and p["slack_id"]):
+        return refused("Your Slack member ID isn't known yet: ask an admin to add it under Settings › People.", 409)
+    db.execute(conn, "UPDATE people SET morning = %s, morning_error = NULL WHERE login = %s", (enabled, login))
+    settings.history_add(conn, actor, f"{login}: morning message {'on' if enabled else 'off'}")
+    return done("You'll get a morning message in Slack on working days, when something's waiting on you."
+                if enabled else "No more morning messages.", enabled=enabled)
+
+
+def morning_now(conn, values: dict, login: str) -> Result:
+    p = db.one(conn, "SELECT * FROM people WHERE login = %s", ((login or "").lower(),))
+    if not p:
+        return refused("Your Slack member ID isn't known yet: ask an admin to add it under Settings › People.", 409)
+    r = rules.send_morning(conn, values, p, datetime.now(timezone.utc))
+    if r == "sent":
+        return done("Sent: look in Slack, in your messages from the app.")
+    if r == "nothing":
+        return done("Nothing's waiting on you right now, so there's nothing to send.", "info")
+    return refused(r.split(": ", 1)[1], 502 if r.startswith("retry") else 409)

@@ -495,12 +495,33 @@ def my_work():
                      if not g.api["service"] else "A service token has no My work.")
     with db.get_conn() as conn:
         w = data.my_work(conn, login, settings.load(conn))
-    return ok({"login": login,
+    with db.get_conn() as conn:
+        morning = actions.morning_status(conn, login)
+    return ok({"login": login, "morning_message": morning,
                "reviews_waiting": [pr_out(p) | {"asked_at": p["asked"], "you_reviewed_before": p["mine_reviewed"]}
                                    for p in w["to_review"]],
                "my_pulls": [pr_out(p) | {"next_step": p["next_step"]} for p in w["mine"]],
                "my_branches": [branch_out(b) for b in w["branches"]],
                "snoozed": [{"pr": p["id"], "until": p["snooze"]["until"], "by": p["snooze"]["by_name"]} for p in w["snoozed"]]})
+
+
+@endpoint("PUT", "/my-work/morning", "self", "Turn the token owner's Slack morning message on or off", "me",
+          body={"enabled": ("boolean", "On or off")})
+def my_morning():
+    login = (g.api.get("github_login") or "").lower()
+    if g.api["service"] or not login:
+        return error(409, "no_github_login", "This needs a person's token, with their GitHub login set.")
+    with db.get_conn() as conn:
+        return result(actions.set_morning(conn, login, bool(body().get("enabled")), actor()))
+
+
+@endpoint("POST", "/my-work/morning/test", "self", "Send the token owner's morning message now", "me")
+def my_morning_test():
+    login = (g.api.get("github_login") or "").lower()
+    if g.api["service"] or not login:
+        return error(409, "no_github_login", "This needs a person's token, with their GitHub login set.")
+    with db.get_conn() as conn:
+        return result(actions.morning_now(conn, settings.load(conn), login))
 
 
 @endpoint("GET", "/metrics", "read", "Review and merge times, merges per week, by repo and by size", "metrics",

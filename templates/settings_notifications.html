@@ -105,7 +105,7 @@
   <div class="card channel-card {{ 'open' if is_open }}" id="rule-{{ r.key }}">
     <div class="row-head">
       <div class="title"><strong>{{ r.name }}</strong><span>{{ r.desc }}</span></div>
-      <div class="acts"><span class="badge {{ {'event': 'info', 'assign': 'good', 'reminder': 'warn', 'digest': 'muted', 'post': 'muted'}[r.kind] }}">{{ {'assign': 'Action', 'post': 'Weekly post'}.get(r.kind, r.kind|capitalize) }}</span><span class="badge muted">{{ r.to }}</span></div>
+      <div class="acts"><span class="badge {{ {'event': 'info', 'assign': 'good', 'reminder': 'warn', 'digest': 'muted', 'post': 'muted', 'dm': 'info'}[r.kind] }}">{{ {'assign': 'Action', 'post': 'Weekly post', 'dm': 'Direct message'}.get(r.kind, r.kind|capitalize) }}</span><span class="badge muted">{{ r.to }}</span></div>
       {% if is_open %}<a class="btn small" href="{{ url_for('admin.notifications') }}#rule-{{ r.key }}">Close</a>{% else %}<a class="btn small" href="{{ url_for('admin.notifications', open=r.key) }}#rule-{{ r.key }}">Edit</a>{% endif %}
       <form method="post" action="{{ url_for('admin.rule_save', key=r.key) }}" class="inline">{{ csrf() }}<input type="hidden" name="toggle" value="1">
         <button type="submit" class="switch" aria-pressed="{{ 'true' if r.enabled else 'false' }}" aria-label="{{ r.name }} switched {{ 'on' if r.enabled else 'off' }}"></button></form>
@@ -131,6 +131,13 @@
         <div class="inline-form">Tell <select name="target" aria-label="Where">{% include "_targets.html" %}</select></div>
         <label class="check"><input type="checkbox" name="mention" value="1" {{ 'checked' if p.mention }}> @mention who was picked</label>
         <p class="hint">Runs in working hours only, once each time a PR is left without a reviewer. It writes to GitHub, so it's off until you switch it on.</p>
+      {% elif r.kind == 'dm' %}
+        <div class="inline-form">On working days at <input class="input num" name="time" value="{{ p.time }}" aria-label="Time"> (working-hours time zone)</div>
+        <div class="field"><label for="dm-token">Slack bot token</label>
+          {% if dm_token %}<div class="stored"><span><strong>Stored</strong> · {{ dm_token }}</span><label class="check" style="min-height: 0"><input type="checkbox" name="remove_token" value="1"> Remove</label></div>{% endif %}
+          <input class="input mono" id="dm-token" name="slack_token" type="password" autocomplete="off" placeholder="{{ 'Paste a new token to replace it' if dm_token else 'xoxb-…' }}">
+          <span class="help">A Slack app's Bot User OAuth Token with the <span class="mono">chat:write</span> and <span class="mono">im:write</span> scopes. Encrypted here and never shown again. It can be the same app as a channel's.</span></div>
+        <p class="hint">Each person opts in on My work. It needs their Slack member ID under Settings › People. Nothing is sent when nothing's waiting on them.</p>
       {% elif r.kind in ('digest', 'post') %}
         <div class="inline-form">Every <select name="day" aria-label="Day">{% for d in days %}<option value="{{ d }}" {{ 'selected' if p.day == d }}>{{ d|capitalize }}day</option>{% endfor %}</select>
           at <input class="input num" name="time" value="{{ p.time }}" aria-label="Time"> (working-hours time zone), to <select name="target" aria-label="Where">{% include "_targets.html" %}</select></div>

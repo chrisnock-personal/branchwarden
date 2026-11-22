@@ -89,6 +89,24 @@
       {% else %}<div class="empty">Nothing snoozed.</div>{% endfor %}
     </section>
   </div>
+  {% if morning %}
+  <section class="card pad" id="morning" aria-labelledby="mm-h" style="max-width: 760px">
+    <h2 id="mm-h">Morning message in Slack</h2>
+    {% if not morning.rule_on or not morning.token_set %}
+      <p class="hint">An admin hasn't switched this on yet (Settings › Channels and reminders › Morning message in Slack).</p>
+    {% elif not morning.slack_id_set %}
+      <p class="hint">Your Slack member ID isn't known yet: ask an admin to add it for <span class="mono">{{ login }}</span> under Settings › People.</p>
+    {% else %}
+      <p class="hint">{% if morning.enabled %}On: working days at {{ morning.time }}, a direct message with the reviews waiting on you and your PRs that need something. Nothing on days when nothing's waiting.{% else %}Off. Turn it on for a direct message on working days at {{ morning.time }} with the reviews waiting on you and your PRs that need something.{% endif %}
+        {% if morning.last_sent %} Last: {{ morning.last_sent.strftime('%a %d %b') }}{% if morning.error %}, which failed: {{ morning.error }}{% endif %}.{% endif %}</p>
+      <form method="post" action="{{ url_for('my_morning') }}" class="inline-form">
+        {{ csrf() }}
+        {% if morning.enabled %}<button class="btn" type="submit">Turn it off</button>{% else %}<button class="btn primary" type="submit" name="on" value="1">Turn it on</button>{% endif %}
+        <button class="btn" type="submit" name="test" value="1">Send me one now</button>
+      </form>
+    {% endif %}
+  </section>
+  {% endif %}
   {% if not via_github %}<p class="hint">Following the GitHub login <span class="mono">{{ login }}</span>, which you set yourself.</p>{% endif %}
   {% endif %}
 </main>

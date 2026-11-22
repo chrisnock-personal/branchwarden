@@ -437,6 +437,7 @@ def notifications():
         rule_list.append({**r, "desc": rules.describe(r, names),
                           "to": rules.target_label(str(r["params"].get("target", "routed")), names)})
     return render_template("settings_notifications.html", channels=chans, rules=rule_list, open_id=open_id,
+                           dm_token=_stored(meta, "SLACK_DM_TOKEN", unreadable),
                            get=lambda k: settings.get(values, k), units=rules.UNITS, days=analysis.DAYS,
                            wf_scopes=rules.WF_SCOPES)
 

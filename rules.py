@@ -62,6 +62,8 @@ RULES = (
          {**REMINDER_DEFAULTS, "after": 7, "unit": "days", "repeat": 7, "max": 2}, enabled=False),
     Rule("digest", "digest", "Weekly stale-branch digest",
          {"day": "mon", "time": "09:00", "target": "all", "mention": True, "limit": 10}),
+    Rule("morning", "dm", "Morning message in Slack",
+         {"time": "09:15", "target": "people"}, enabled=False),
     Rule("mvp", "post", "Weekly MVP post",
          {"day": "fri", "time": "16:00", "target": "all", "mention": True}, enabled=False),
 )
@@ -111,6 +113,9 @@ def describe(rule: dict, channel_names: dict[int, str]) -> str:
         where = f" in {p['repos']}" if p.get("repos") else ""
         return (f"After {_amount(p['after'], p['unit'])} with nobody asked{where}: requests {count} "
                 f"reviewer{'s' if count != 1 else ''} on GitHub, from {' then '.join(source)}")
+    if rule["kind"] == "dm":
+        return (f"Working days at {p.get('time', '09:15')}: a Slack direct message to each person who's opted in "
+                "(on My work), with the reviews waiting on them and their PRs needing action. Nothing when there's nothing")
     if rule["kind"] == "post":
         return (f"{p['day'].capitalize()}days at {p['time']}: the last 7 days' MVPs for reviews, merges, "
                 "branch prunes and PRs raised, with the top three of each")
@@ -130,6 +135,8 @@ def _amount(n, unit: str) -> str:
 
 
 def target_label(target: str, channel_names: dict[int, str]) -> str:
+    if target == "people":
+        return "Each person, in Slack"
     if target == "routed":
         return "Routed channels"
     if target == "all":
@@ -641,3 +648,79 @@ def run_mvp_post(conn, values: dict, now: Optional[datetime] = None, force: bool
     queued = notify.enqueue(conn, notify.channels_for(conn, str(p.get("target", "all"))), "mvp", msg) if msg else 0
     db.execute(conn, "UPDATE rules SET last_run_at = %s WHERE key = 'mvp'", (now,))
     return queued
+
+
+# ─── Morning message in Slack ───────────────────────────────────────────────
+
+def morning_message(work: dict, name: str, link: Optional[str], tz=timezone.utc) -> Optional[dict]:
+    """One person's morning DM, or None when nothing's waiting on them."""
+    reviews = work["to_review"]
+    needs = [p for p in work["mine"] if p.get("next_step")]
+    if not reviews and not needs:
+        return None
+    bits = []
+    if reviews:
+        bits.append(f"{len(reviews)} review{'s' if len(reviews) != 1 else ''} waiting on you, oldest {reviews[0]['asked_ago']}")
+    if needs:
+        bits.append(f"{len(needs)} of your PRs need{'s' if len(needs) == 1 else ''} something")
+    sections = []
+    if reviews:
+        sections.append({"title": "Waiting on your review", "lines": [
+            {"link": p["url"], "label": p["ref"], "text": f"{p['title']} · asked {p['asked_ago']} ago"}
+            for p in reviews[:8]], "more": f"+ {len(reviews) - 8} more" if len(reviews) > 8 else ""})
+    if needs:
+        sections.append({"title": "Your pull requests", "lines": [
+            {"link": p["url"], "label": p["ref"], "text": f"{p['title']} · {p['next_step']}"} for p in needs[:8]],
+            "more": f"+ {len(needs) - 8} more" if len(needs) > 8 else ""})
+    first = (name or "").split(" ")[0] or "there"
+    return {"heading": f"Good morning, {first}", "tone": "info", "text": "; ".join(bits) + ".",
+            "sections": sections, "buttons": [["Open My work", link]]}
+
+
+def send_morning(conn, values: dict, person: dict, now: datetime) -> str:
+    """Send one person's morning DM now. Returns "sent", "nothing", "retry: …" (Slack busy or
+    unreachable: worth another go) or "failed: …" (a setup problem, shown to the person)."""
+    token = values.get("SLACK_DM_TOKEN")
+    if not token:
+        return "failed: no Slack bot token is set (Settings › Channels and reminders › Morning message)"
+    if not person.get("slack_id"):
+        return "failed: no Slack member ID for this login (Settings › People)"
+    work = data.my_work(conn, person["login"], values, now)
+    msg = morning_message(work, person.get("name") or person["login"], _link(values, "/me"))
+    if not msg:
+        return "nothing"
+    payload = {**notify.slack_message(msg, {}), "channel": person["slack_id"], "unfurl_links": False}
+    try:
+        notify.slack_api_post(token, payload)
+    except notify.RetryLater as exc:
+        return f"retry: {exc}"
+    except notify.PermanentFailure as exc:
+        return f"failed: {exc}"
+    return "sent"
+
+
+def run_morning(conn, values: dict, now: Optional[datetime] = None, force_login: Optional[str] = None) -> int:
+    """At the rule's time on working days, each opted-in person's DM, once a day. Returns how many were sent."""
+    now = now or datetime.now(timezone.utc)
+    rule = load(conn)["morning"]
+    if not rule["enabled"] or not values.get("SLACK_DM_TOKEN"):
+        return 0
+    hours = work_hours(values)
+    local = now.astimezone(hours.tz)
+    try:
+        hh, mm = (int(x) for x in str(rule["params"].get("time", "09:15")).split(":"))
+        at = time(hh, mm)
+    except ValueError:
+        at = time(9, 15)
+    if local.weekday() not in hours.days or local.time() < at:
+        return 0
+    sent = 0
+    for person in db.rows(conn, """SELECT * FROM people WHERE morning AND slack_id <> ''
+                                    AND (morning_last IS NULL OR morning_last < %s)""", (local.date(),)):
+        result = send_morning(conn, values, person, now)
+        if result.startswith("retry"):
+            continue                                   # try again on the next tick
+        db.execute(conn, "UPDATE people SET morning_last = %s, morning_error = %s WHERE login = %s",
+                   (local.date(), result[len("failed: "):] if result.startswith("failed") else None, person["login"]))
+        sent += result == "sent"
+    return sent
