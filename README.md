@@ -291,6 +291,25 @@ curl -s -H "Authorization: Bearer $TOKEN" https://branchwarden.example.com/api/v
 curl -s -H "Authorization: Bearer $TOKEN" 'https://branchwarden.example.com/api/v1/pulls?filter=stalled&repo=api-*'
 ```
 
+## Command line
+
+`branchwarden`, in [`cli/`](cli/README.md), wraps the API for the terminal,
+scripts and AI agents: `me`, `prs list --filter stalled`, `prs reviewers add
+412 --user sasha --dry-run`, `branches list --status stale`, `workflows
+--problems`, `admin settings set scanning STALE_DAYS=45`, and `api` for
+anything else.
+
+```bash
+pipx install "git+https://github.com/chrisnock-personal/branchwarden#subdirectory=cli"
+branchwarden login --url https://branchwarden.example.com
+branchwarden me
+```
+
+- **The token** lives in the OS keychain, or in `BRANCHWARDEN_TOKEN` for CI.
+- **A self-signed certificate** is pinned by its fingerprint at login.
+- **Output:** `--json` gives the API's own JSON and `--quiet` just ids.
+- **Exit codes** say what happened, so scripts can act on them.
+
 ## Roles
 
 | Role | Can |
@@ -482,6 +501,8 @@ Two GitHub Actions workflows, both in `.github/workflows/`:
     token, tokens' life cycle, and the main calls end to end; plus checks
     that the OpenAPI document is valid and matches the routes, and that
     `docs/api.md` is current,
+  - the CLI's tests: every command against the running app, exit codes,
+    and certificate pinning against a real HTTPS server,
   - the browser test, in Chromium: first-run setup, every section, a repo
     page, filters, a workflow row, the theme switch, a form and the menu,
   - `pip-audit` for known vulnerabilities in the pinned dependencies,
@@ -544,6 +565,7 @@ The files:
 | `access.py` | Who may do what: one rule for the dashboard and the API |
 | `actions.py` | Every change, shared by the dashboard's forms and the API |
 | `api.py`, `apitokens.py` | The JSON API and its OpenAPI document; API tokens |
+| `cli/` | The `branchwarden` command line, a separate package |
 | `demo.py` | Loading and removing the demo data |
 | `healthcheck.py` | Container health checks, and the worker's heartbeat |
 | `deploy/quadlet/` | Podman quadlet files, to run as systemd services |

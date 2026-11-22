@@ -18,6 +18,13 @@ All notable changes to Branchwarden. The format follows
   Users and access. Shown once and stored as a hash; optional expiry; last
   used; a rate limit; changes recorded in the history with the token named.
 
+- **The `branchwarden` command line** (#19), in `cli/`: `me`, `prs`,
+  `branches`, `repos`, `workflows`, `metrics`, `mvp`, `scan`, `tokens`,
+  `admin` and a raw `api` command. The token lives in the OS keychain (or
+  `BRANCHWARDEN_TOKEN`), a self-signed certificate is pinned by fingerprint,
+  `--json` and `--quiet` suit scripts and agents, exit codes mean something,
+  and reviewer requests (which write to GitHub) ask first and have `--dry-run`.
+
 ### Changed
 
 - One access rule (`access.py`) and one set of actions (`actions.py`) now

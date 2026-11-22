@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "branchwarden-cli"
+dynamic = ["version"]
+description = "Command line for Branchwarden's API: pull requests, reviews, branches and more, for people, scripts and AI agents"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = ["keyring>=25.6,<27"]
+
+[project.scripts]
+branchwarden = "branchwarden_cli.main:main"
+
+[project.urls]
+Source = "https://github.com/chrisnock-personal/branchwarden"
+
+[tool.setuptools.dynamic]
+version = { attr = "branchwarden_cli.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["branchwarden_cli*"]

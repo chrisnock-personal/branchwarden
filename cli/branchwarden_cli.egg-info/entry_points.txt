@@ -1,0 +1,2 @@
+[console_scripts]
+branchwarden = branchwarden_cli.main:main
