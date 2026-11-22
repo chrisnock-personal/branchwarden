@@ -25,6 +25,12 @@ All notable changes to Branchwarden. The format follows
   `--json` and `--quiet` suit scripts and agents, exit codes mean something,
   and reviewer requests (which write to GitHub) ask first and have `--dry-run`.
 
+- **A Prometheus endpoint** (#15) at `/metrics/prometheus`, scraped with an
+  API token: open PRs by repo and state, flagged PRs, branches by status,
+  reviews waiting per reviewer, review and merge time summaries, failing
+  workflows, repo health flags, and the worker's health (last scan, errors,
+  API budget, skipped repos, scans stopped, messages pending and failed).
+
 ### Changed
 
 - One access rule (`access.py`) and one set of actions (`actions.py`) now

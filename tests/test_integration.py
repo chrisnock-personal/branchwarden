@@ -282,7 +282,7 @@ def test_every_page_renders_with_demo_data(db_url):
         conn.commit()
         c, csrf, app = _client(conn)
         skip = {"admin.logout", "admin.login", "admin.setup", "admin.welcome", "admin.github_login",
-                "admin.github_callback", "healthz", "static", "deliveries"}
+                "admin.github_callback", "healthz", "static", "deliveries", "prometheus"}   # (its own test: test_prom.py)
         paths = sorted({r.rule for r in app.url_map.iter_rules()
                         if "GET" in r.methods and not r.arguments and r.endpoint not in skip
                         and not r.endpoint.startswith("api.")})      # the API has its own tests (test_api.py)

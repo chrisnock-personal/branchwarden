@@ -291,6 +291,40 @@ curl -s -H "Authorization: Bearer $TOKEN" https://branchwarden.example.com/api/v
 curl -s -H "Authorization: Bearer $TOKEN" 'https://branchwarden.example.com/api/v1/pulls?filter=stalled&repo=api-*'
 ```
 
+## Prometheus
+
+`/metrics/prometheus` serves the headline numbers for Grafana and alerting,
+labelled by repo:
+- **Pull requests:** open PRs by state, and those that are big, stalled,
+  failing CI, conflicting, without a ticket or needing review.
+- **Waiting:** the longest wait per repo, reviews waiting per reviewer and
+  their oldest request.
+- **Branches:** by status: stale, left after a merge or close, pushed after merge.
+- **Speed:** time to first review and to merge, as summaries (median and
+  90th percentile) over 30 days.
+- **Repos:** failing workflows and repo health flags.
+- **The worker:** the last full scan's time, duration, error, repos read and
+  skipped, and GitHub budget left; whether scans have stopped; and messages
+  pending, failed and sent in the last day.
+
+It's scraped with an API token, so there's no separate secret: make a
+read-only **service token** with the viewer role under *Settings › Users and
+access*. It's worked out at most every 15 seconds, however often it's scraped.
+
+```yaml
+scrape_configs:
+  - job_name: branchwarden
+    scheme: https
+    metrics_path: /metrics/prometheus
+    authorization: { credentials: bwt_… }
+    tls_config: { ca_file: branchwarden.pem }   # or insecure_skip_verify while it's self-signed
+    static_configs: [{ targets: ["branchwarden.example.com:8443"] }]
+```
+
+For example, alert on `branchwarden_scans_stopped == 1`, on
+`branchwarden_messages{status="failed"} > 0`, or when
+`branchwarden_reviews_waiting` stays high for someone.
+
 ## Command line
 
 `branchwarden`, in [`cli/`](cli/README.md), wraps the API for the terminal,
@@ -566,6 +600,7 @@ The files:
 | `actions.py` | Every change, shared by the dashboard's forms and the API |
 | `api.py`, `apitokens.py` | The JSON API and its OpenAPI document; API tokens |
 | `cli/` | The `branchwarden` command line, a separate package |
+| `prom.py` | The Prometheus endpoint |
 | `demo.py` | Loading and removing the demo data |
 | `healthcheck.py` | Container health checks, and the worker's heartbeat |
 | `deploy/quadlet/` | Podman quadlet files, to run as systemd services |

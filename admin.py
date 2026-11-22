@@ -38,7 +38,7 @@ log = logging.getLogger("branchwarden.dashboard")
 bp = Blueprint("admin", __name__)
 
 OPEN_ENDPOINTS = {"admin.login", "admin.setup", "admin.welcome", "admin.github_login", "admin.github_callback"}
-ALWAYS_OPEN = {"static", "healthz", "github_webhook"}
+ALWAYS_OPEN = {"static", "healthz", "github_webhook", "prometheus"}   # the last checks its own token
 
 _setup_code: list[str] = []
 _failures: dict[str, deque] = defaultdict(deque)

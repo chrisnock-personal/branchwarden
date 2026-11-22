@@ -24,7 +24,7 @@ from typing import Optional
 from urllib.parse import urlencode
 
 from dotenv import load_dotenv
-from flask import Flask, abort, flash, g, redirect, render_template, request, url_for
+from flask import Flask, Response, abort, flash, g, redirect, render_template, request, url_for
 from psycopg2.extras import Json
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -39,6 +39,7 @@ import db  # noqa: E402
 import metrics  # noqa: E402
 import mvp  # noqa: E402
 import notify  # noqa: E402
+import prom  # noqa: E402
 import repohealth  # noqa: E402
 import repos as repos_mod  # noqa: E402
 import rules  # noqa: E402
@@ -691,6 +692,28 @@ def github_webhook():
                    (event or "?", action, repo or None, status))
         db.execute(conn, "DELETE FROM webhook_log WHERE received_at < NOW() - INTERVAL '14 days'")
     return ({"ok": True}, status) if status != 204 else ("", 204)
+
+
+@app.get("/metrics/prometheus")
+def prometheus():
+    """For Prometheus: an API token with read access (a read-only service token, usually)."""
+    insecure_ok = os.getenv("BRANCHWARDEN_INSECURE_HTTP", "").lower() in ("1", "true", "yes")
+    plain = lambda text, status: Response(text + "\n", status, mimetype="text/plain")  # noqa: E731
+    if not request.is_secure and not insecure_ok:
+        return plain("Use HTTPS.", 403)
+    auth = request.headers.get("Authorization", "")
+    token = auth[7:].strip() if auth[:7].lower() == "bearer " else ""
+    with db.get_conn() as conn:
+        who = apitokens.authenticate(conn, token) if token else None
+    if not who or not access.allowed(who["role"], "read", who["scope"]):
+        resp = plain("Send an API token: Authorization: Bearer bwt_… (a read-only service token, "
+                     "from Settings › Users and access).", 401)
+        resp.headers["WWW-Authenticate"] = 'Bearer realm="branchwarden"'
+        return resp
+    resp = Response(prom.cached(), mimetype="text/plain")
+    resp.headers["Content-Type"] = "text/plain; version=0.0.4; charset=utf-8"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @app.get("/healthz")
