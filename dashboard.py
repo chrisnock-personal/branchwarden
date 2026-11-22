@@ -47,7 +47,7 @@ from version import VERSION  # noqa: E402
 import settings  # noqa: E402
 import workflows  # noqa: E402
 from admin import bp as admin_bp  # noqa: E402
-from api import bp as api_bp, error as api_error  # noqa: E402
+from api import bp as api_bp, error as api_error, failures_exceeded as api_failures_exceeded  # noqa: E402
 from github import Connections, GitHubError, verify_signature  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-7s  %(message)s",
@@ -715,8 +715,12 @@ def prometheus():
         return plain("Use HTTPS.", 403)
     auth = request.headers.get("Authorization", "")
     token = auth[7:].strip() if auth[:7].lower() == "bearer " else ""
+    if api_failures_exceeded(request.remote_addr):
+        return plain("Too many bad tokens from this address: wait a minute.", 429)
     with db.get_conn() as conn:
         who = apitokens.authenticate(conn, token) if token else None
+    if token and not who:
+        api_failures_exceeded(request.remote_addr, add=True)
     if not who or not access.allowed(who["role"], "read", who["scope"]):
         resp = plain("Send an API token: Authorization: Bearer bwt_… (a read-only service token, "
                      "from Settings › Users and access).", 401)

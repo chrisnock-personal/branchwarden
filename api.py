@@ -49,7 +49,23 @@ from version import VERSION
 bp = Blueprint("api", __name__, url_prefix="/api/v1")
 
 RATE_LIMIT = int(os.getenv("BRANCHWARDEN_API_RATE", "300"))      # requests per token per minute
+FAILED_LIMIT = 30                                                 # bad tokens per client address per minute
 _calls: dict[int, deque] = defaultdict(deque)
+_failed: dict[str, deque] = defaultdict(deque)
+
+
+def failures_exceeded(addr: str, add: bool = False) -> bool:
+    """Too many bad tokens from one address in the last minute? (add=True records one more.)
+    Tokens can't be guessed, but each try costs a lookup: this keeps that cheap."""
+    now = time.monotonic()
+    q = _failed[addr or "?"]
+    while q and now - q[0] > 60:
+        q.popleft()
+    if add:
+        q.append(now)
+    if not q:
+        _failed.pop(addr or "?", None)
+    return len(q) > FAILED_LIMIT
 
 
 # ─── Declaring endpoints ────────────────────────────────────────────────────
@@ -196,10 +212,17 @@ def authenticate():
         resp = error(401, None, "Send a token: Authorization: Bearer bwt_… (make one under your name › API tokens).")
         resp.headers["WWW-Authenticate"] = 'Bearer realm="branchwarden"'
         return resp
+    if failures_exceeded(request.remote_addr):
+        resp = error(429, None, "Too many bad tokens from this address: wait a minute.")
+        resp.headers["Retry-After"] = "60"
+        return resp
+    why: list = []
     with db.get_conn() as conn:
-        who = apitokens.authenticate(conn, token)
+        who = apitokens.authenticate(conn, token, why=why)
     if not who:
-        resp = error(401, None, "That token isn't valid: unknown, revoked or expired, or its owner has gone.")
+        failures_exceeded(request.remote_addr, add=True)
+        resp = error(401, None, why[0] if why else
+                     "That token isn't valid: unknown, revoked or expired, or its owner has gone.")
         resp.headers["WWW-Authenticate"] = 'Bearer realm="branchwarden", error="invalid_token"'
         return resp
     now = time.monotonic()

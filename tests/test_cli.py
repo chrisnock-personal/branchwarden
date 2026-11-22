@@ -190,6 +190,8 @@ def test_login_checks_and_stores_the_address(live, monkeypatch, capsys):
     assert cli.main(["login", "--url", live["url"], "--yes"]) == 0
     assert "wasn't stored" in capsys.readouterr().out             # no keychain in the test
     assert cli.load_config()["url"] == live["url"]
+    assert cli.main(["login", "--url", live["url"], "--yes", "--token", live["tokens"]["viewer"]]) == 0
+    assert "shell history" in capsys.readouterr().err               # a typed token: warned about
     monkeypatch.delenv("BRANCHWARDEN_TOKEN")
     assert cli.main(["login", "--url", live["url"], "--yes"]) == 2  # no token and no terminal: no prompt, a clear error
     assert "Give a token" in capsys.readouterr().err

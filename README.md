@@ -284,6 +284,10 @@ document at `/api/v1/openapi.json`).
   changes what their tokens can do. Admins can also make **service tokens**
   with a role of their own (*Settings › Users and access*). A token is shown
   once; only its hash is kept, with when it was last used.
+  For people who **sign in with GitHub**, whose role comes from their GitHub
+  teams at each sign-in, tokens only work while they've signed in within the
+  last 30 days, and a refused sign-in (no longer in any role list) revokes
+  all their tokens: leaving the teams ends API access too.
 - **The same rules as the dashboard:** one check decides what a viewer, member
   or admin may do in both, and every change goes through the same code, with
   the same validation and the same entry in the change history, naming the
@@ -291,7 +295,8 @@ document at `/api/v1/openapi.json`).
   refused exactly as its page is.
 - **Safe by default:** bearer tokens only (cookies don't work on the API, so
   there's nothing for a cross-site form to use), HTTPS only, a rate limit per
-  token, and secrets stay write-only, as in the dashboard. Requesting
+  token and on bad tokens per address, and secrets stay write-only, as in the
+  dashboard. Requesting
   reviewers takes `dry_run` to see what would be sent to GitHub.
 
 ```bash

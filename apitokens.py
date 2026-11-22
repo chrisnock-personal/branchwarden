@@ -21,6 +21,9 @@ import db
 import settings
 
 PREFIX = "bwt_"
+# Someone who signs in with GitHub has their role worked out again (from their teams) at each
+# sign-in. Their tokens only work while that's recent, so leaving the teams ends API access too.
+GITHUB_FRESH = timedelta(days=30)
 SHOWN = 12          # characters kept to tell tokens apart: bwt_ and 8 more
 MAX_DAYS = 3650
 
@@ -79,20 +82,27 @@ def revoke(conn, token_id: int, actor: str, *, user_id: Optional[int] = None) ->
     return bool(row)
 
 
-def authenticate(conn, token: str, now: Optional[datetime] = None) -> Optional[dict]:
+def authenticate(conn, token: str, now: Optional[datetime] = None, why: Optional[list] = None) -> Optional[dict]:
     """Who a token acts as: {token_id, prefix, name, scope, role, user_id, user_name, github_login,
-    via_github, actor}, or None if it's unknown, revoked, expired, or its owner has gone."""
+    via_github, actor}, or None if it's unknown, revoked, expired, or its owner has gone or (signing in
+    with GitHub) hasn't signed in for GITHUB_FRESH. A reason goes into `why`, when given, for the owner's
+    sake: it never says more than that the token exists."""
     if not token or not token.startswith(PREFIX) or len(token) > 200:
         return None
     now = now or datetime.now(timezone.utc)
     row = db.one(conn, """SELECT t.*, u.name AS user_name, u.role AS user_role, u.github_login,
-                                 (u.github_id IS NOT NULL) AS via_github,
+                                 (u.github_id IS NOT NULL) AS via_github, u.last_login,
                                  (u.password_hash IS NOT NULL OR u.github_id IS NOT NULL) AS active
                             FROM api_tokens t LEFT JOIN users u ON u.id = t.user_id
                            WHERE t.token_hash = %s""", (_hash(token),))
     if not row or row["revoked_at"] or (row["expires_at"] and row["expires_at"] <= now):
         return None
     if row["user_id"] is not None and not (row["user_role"] and row["active"]):
+        return None
+    if row["via_github"] and (not row["last_login"] or now - row["last_login"] > GITHUB_FRESH):
+        if why is not None:
+            why.append("This token's owner signs in with GitHub and hasn't for 30 days: sign in to the "
+                       "dashboard again (which checks your GitHub teams), and the token works again.")
         return None
     if not row["last_used_at"] or now - row["last_used_at"] > timedelta(minutes=1):
         db.execute(conn, "UPDATE api_tokens SET last_used_at = %s WHERE id = %s", (now, row["id"]))
@@ -102,3 +112,12 @@ def authenticate(conn, token: str, now: Optional[datetime] = None) -> Optional[d
             "role": row["role"] if service_token else row["user_role"], "user_id": row["user_id"],
             "user_name": row["user_name"], "github_login": row["github_login"], "via_github": bool(row["via_github"]),
             "service": service_token, "actor": f"{who} (API token {row['prefix']}…)"}
+
+
+def revoke_all(conn, user_id: int, actor: str, reason: str) -> int:
+    """Revoke every token a person has (when they've lost access)."""
+    n = db.execute(conn, "UPDATE api_tokens SET revoked_at = NOW() WHERE user_id = %s AND revoked_at IS NULL",
+                   (user_id,))
+    if n:
+        settings.history_add(conn, actor, f"API tokens revoked ({n}): {reason}")
+    return n

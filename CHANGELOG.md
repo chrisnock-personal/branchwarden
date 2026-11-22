@@ -4,6 +4,22 @@ All notable changes to Branchwarden. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.1] - 2026-11-22
+
+### Security
+
+From a review of the API added in 0.5.0:
+
+- **Tokens of people who sign in with GitHub now follow their GitHub access.**
+  Their role is worked out from their GitHub teams at each sign-in, so before
+  this, someone removed from the teams kept API access through their tokens.
+  Now those tokens only work while the account has signed in within the last
+  30 days, and a refused GitHub sign-in revokes all of that person's tokens.
+- **Bad tokens are throttled:** more than 30 a minute from one address, on the
+  API or `/metrics/prometheus`, gets 429 for a minute.
+- **The CLI warns when a token is typed on the command line** (it can end up in
+  shell history and the process list), and suggests being asked or `--token -`.
+
 ## [0.5.0] - 2026-11-22
 
 ### Added

@@ -195,6 +195,11 @@ def github_callback():
     if not role:
         _failures[key].append(time.monotonic())
         log.info("GitHub sign-in refused for %s: in none of the role lists", who["login"])
+        with db.get_conn() as conn:
+            known = db.one(conn, "SELECT id FROM users WHERE github_id = %s", (who["id"],))
+            if known:
+                apitokens.revoke_all(conn, known["id"], "Branchwarden",
+                                     f"{who['login']} is no longer in any GitHub role list")
         return redirect(url_for("admin.login", error=f"{who['login']} isn't allowed in. Ask an admin to add you "
                                                      "or one of your GitHub teams under Users and access."))
     with db.get_conn() as conn:

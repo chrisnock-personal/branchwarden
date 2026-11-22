@@ -316,6 +316,10 @@ def cmd_login(args):
                        f"{nice_fingerprint(got)}: check it against Settings › TLS, then pass --fingerprint.", 3)
         pin = got
     token = args.token
+    if token and token != "-":
+        print("branchwarden: note: a token typed on the command line can end up in your shell history and in "
+              "the process list. Next time, leave --token out to be asked, or use --token - and pipe it in.",
+              file=sys.stderr)
     if token == "-":
         token = sys.stdin.readline().strip()
     token = token or os.environ.get("BRANCHWARDEN_TOKEN")

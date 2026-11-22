@@ -41,6 +41,11 @@ In short (details in the [README's Security section](README.md#security)):
 - **Fail closed:** no default accounts (the first admin needs a one-time code
   from the server's log), no default database password, webhooks without a
   valid signature refused, CSRF tokens on every form, throttled sign-ins.
+- **API tokens:** shown once and stored as SHA-256 hashes, sent only as bearer
+  tokens (never cookies or URLs), acting with their owner's current role or
+  read-only. A GitHub-sign-in account's tokens need a sign-in within 30 days
+  (which re-checks its teams), and are revoked when its sign-in is refused.
+  Bad tokens are throttled per address.
 - **Narrow reach:** Postgres isn't published, the containers run as an
   unprivileged user, and Branchwarden's only write to GitHub is requesting reviewers.
 - **CI** runs the unit, integration and browser tests, `pip-audit` and

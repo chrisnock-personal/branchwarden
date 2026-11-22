@@ -19,6 +19,7 @@ import settings
 def env(db_url, monkeypatch):
     import dashboard
     api._calls.clear()
+    api._failed.clear()
     with db.get_conn() as conn:
         demo.load(conn, settings.load(conn))
         ids = {}
@@ -217,3 +218,30 @@ def test_token_pages_in_the_dashboard(env):
     assert call(env, "GET", "/me", token=token).get_json()["name"] == "Viewer"
     assert "From the page" in c.get("/me/tokens", base_url="https://localhost").get_data(as_text=True)
     assert token not in c.get("/me/tokens", base_url="https://localhost").get_data(as_text=True)   # shown once
+
+
+def test_github_sign_in_tokens_need_a_recent_sign_in(db_url):
+    with db.get_conn() as conn:
+        settings.create_user(conn, "admin@example.com", "Admin", "admin", "test", password="a-long-test-password")
+        uid = settings.github_user(conn, {"id": 4242, "login": "gh-user", "name": "GH User"}, "member",
+                                   "4242+gh-user@users.noreply.github.com")
+        _, token = apitokens.create(conn, "cli", "write", "GH User", user_id=uid)
+        assert apitokens.authenticate(conn, token)["role"] == "member"
+        db.execute(conn, "UPDATE users SET last_login = NOW() - INTERVAL '31 days' WHERE id = %s", (uid,))
+        why: list = []
+        assert apitokens.authenticate(conn, token, why=why) is None and "sign in to the dashboard" in why[0]
+        db.execute(conn, "UPDATE users SET last_login = NOW() WHERE id = %s", (uid,))     # signed in again
+        assert apitokens.authenticate(conn, token) is not None
+        _, second = apitokens.create(conn, "agent", "read", "GH User", user_id=uid)
+        assert apitokens.revoke_all(conn, uid, "Branchwarden", "left the teams") == 2
+        assert apitokens.authenticate(conn, token) is None and apitokens.authenticate(conn, second) is None
+
+
+def test_bad_tokens_are_throttled_per_address(env, monkeypatch):
+    monkeypatch.setattr(api, "FAILED_LIMIT", 3)
+    api._failed.clear()
+    codes = [call(env, "GET", "/me", token=f"bwt_bad{i}").status_code for i in range(6)]
+    assert codes[:4] == [401, 401, 401, 401] and codes[-1] == 429
+    assert call(env, "GET", "/me", "viewer").status_code == 429          # the address waits a minute, whatever the token
+    api._failed.clear()
+    assert call(env, "GET", "/me", "viewer").status_code == 200
