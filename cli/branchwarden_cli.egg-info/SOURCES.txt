@@ -1,9 +1,0 @@
-pyproject.toml
-branchwarden_cli/__init__.py
-branchwarden_cli/main.py
-branchwarden_cli.egg-info/PKG-INFO
-branchwarden_cli.egg-info/SOURCES.txt
-branchwarden_cli.egg-info/dependency_links.txt
-branchwarden_cli.egg-info/entry_points.txt
-branchwarden_cli.egg-info/requires.txt
-branchwarden_cli.egg-info/top_level.txt

@@ -1,9 +1,0 @@
-Metadata-Version: 2.4
-Name: branchwarden-cli
-Version: 0.4.1
-Summary: Command line for Branchwarden's API: pull requests, reviews, branches and more, for people, scripts and AI agents
-License-Expression: MIT
-Project-URL: Source, https://github.com/chrisnock-personal/branchwarden
-Requires-Python: >=3.10
-Description-Content-Type: text/markdown
-Requires-Dist: keyring<27,>=25.6
