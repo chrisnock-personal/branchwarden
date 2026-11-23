@@ -216,7 +216,10 @@ def test_token_pages_in_the_dashboard(env):
     body = resp.get_data(as_text=True)
     token = re.search(r'id="new-token">(bwt_[^<]+)<', body).group(1)
     assert call(env, "GET", "/me", token=token).get_json()["name"] == "Viewer"
-    assert "From the page" in c.get("/me/tokens", base_url="https://localhost").get_data(as_text=True)
+    page = c.get("/me/tokens", base_url="https://localhost").get_data(as_text=True)
+    assert "From the page" in page
+    # The box with ready-to-copy commands for the CLI and an MCP client, for this server.
+    assert "branchwarden login --url https://localhost" in page and "claude mcp add branchwarden" in page
     assert token not in c.get("/me/tokens", base_url="https://localhost").get_data(as_text=True)   # shown once
 
 

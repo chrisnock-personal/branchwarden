@@ -4,6 +4,15 @@ All notable changes to Branchwarden. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.1] - 2026-11-23
+
+### Added
+
+- **"Use it from the command line or an AI agent"** on the API tokens page:
+  ready-to-copy commands to install the CLI, sign in to this server (with
+  its certificate's fingerprint while it's self-signed) and add the MCP
+  server to Claude Code, plus the variables for scripts and CI.
+
 ## [0.6.0] - 2026-11-22
 
 ### Added

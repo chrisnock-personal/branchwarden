@@ -45,6 +45,7 @@ import repos as repos_mod  # noqa: E402
 import rules  # noqa: E402
 from version import VERSION  # noqa: E402
 import settings  # noqa: E402
+import tls  # noqa: E402
 import workflows  # noqa: E402
 from admin import bp as admin_bp  # noqa: E402
 from api import bp as api_bp, error as api_error, failures_exceeded as api_failures_exceeded  # noqa: E402
@@ -555,11 +556,26 @@ def my_login():
 
 # ─── API tokens ─────────────────────────────────────────────────────────────
 
+def connect_info(values: dict) -> dict:
+    """What the CLI and an MCP client need to reach this Branchwarden: its address, and while
+    its certificate is self-signed, the fingerprint to pin (otherwise the system trusts it)."""
+    url = (settings.get(values, "PUBLIC_URL") or request.url_root).rstrip("/")
+    fingerprint = None
+    if tls.enabled():
+        try:
+            info = tls.describe()
+            fingerprint = info["fingerprint"] if info["self_signed"] else None
+        except (OSError, ValueError):
+            fingerprint = None
+    return {"url": url, "fingerprint": fingerprint}
+
+
 @app.get("/me/tokens")
 def my_tokens(new_token: Optional[dict] = None):
     with db.get_conn() as conn:
         tokens = apitokens.mine(conn, g.user["id"])
-    return render_template("tokens.html", tokens=tokens, new_token=new_token)
+        connect = connect_info(settings.load(conn))
+    return render_template("tokens.html", tokens=tokens, new_token=new_token, connect=connect)
 
 
 @app.post("/me/tokens")

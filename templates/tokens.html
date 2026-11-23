@@ -30,5 +30,20 @@
     <p class="hint">Anyone holding the token can do what it allows until it expires or you revoke it. Give an AI agent or a script a read-only one unless it has to change things.</p>
     <div class="actions"><span></span><button class="btn primary" type="submit">Make token</button></div>
   </form>
+
+  <section class="card pad" id="connect" aria-labelledby="connect-h">
+    <h2 id="connect-h">Use it from the command line or an AI agent</h2>
+    <p class="hint">The <span class="mono">branchwarden</span> command line, and its MCP server for agents such as Claude Code and Claude Desktop. Paste your token when <span class="mono">login</span> asks for it: it's kept in your computer's keychain, not in a file or your shell history.</p>
+    <ol class="connect-steps">
+      <li><span>Install it (Python 3.10 or later):</span>
+        <div class="link-box"><code id="conn-install">pipx install "branchwarden-cli[mcp] @ git+https://github.com/chrisnock-personal/branchwarden#subdirectory=cli"</code><button type="button" class="btn" data-copy="conn-install">Copy</button></div></li>
+      <li><span>Sign in{% if connect.fingerprint %}, trusting this server's own certificate by its fingerprint{% endif %}:</span>
+        <div class="link-box"><code id="conn-login">branchwarden login --url {{ connect.url }}{% if connect.fingerprint %} --fingerprint {{ connect.fingerprint|replace(':', '') }}{% endif %}</code><button type="button" class="btn" data-copy="conn-login">Copy</button></div></li>
+      <li><span>Add it to Claude Code (or see the <a href="https://github.com/chrisnock-personal/branchwarden/blob/main/cli/README.md" rel="noopener">CLI's README</a> for Claude Desktop):</span>
+        <div class="link-box"><code id="conn-claude">claude mcp add branchwarden -- branchwarden mcp</code><button type="button" class="btn" data-copy="conn-claude">Copy</button></div></li>
+    </ol>
+    <p class="hint">Then try <span class="mono">branchwarden me</span>, or ask your agent what's waiting on you. For scripts and CI, set <span class="mono">BRANCHWARDEN_URL={{ connect.url }}</span> and <span class="mono">BRANCHWARDEN_TOKEN</span>{% if connect.fingerprint %}, and <span class="mono">BRANCHWARDEN_FINGERPRINT</span> as above{% endif %} instead of signing in.
+      Give an agent a <b>read-only</b> token unless it has to change things; even then, it asks before requesting reviewers on GitHub.</p>
+  </section>
 </main>
 {% endblock %}
