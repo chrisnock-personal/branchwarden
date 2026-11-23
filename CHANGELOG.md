@@ -9,6 +9,9 @@ All notable changes to Branchwarden. The format follows
 ### Changed
 
 - **Python 3.15** in the image (was 3.12), and CI now runs every test on 3.15.
+- **The MCP server runs on the 2.x MCP SDK** (the CLI's `mcp` extra now needs
+  `mcp>=2.3`). Tools are unchanged; refusals (a read-only token, a bad argument)
+  still reach the agent with their reason.
 - **Updated:** gunicorn 27, and in CI checkout v7, setup-python v7 and gitleaks v3
   (Dependabot).
 

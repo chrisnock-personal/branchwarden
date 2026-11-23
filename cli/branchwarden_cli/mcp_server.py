@@ -15,15 +15,16 @@ from __future__ import annotations
 
 from typing import Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError   # its message reaches the agent; other errors are hidden
 from mcp.types import ToolAnnotations
 
 from . import __version__
 from . import main as cli
 
-READ = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
-LOCAL = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
-GITHUB = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True)
+READ = ToolAnnotations(read_only_hint=True, open_world_hint=False)
+LOCAL = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False)
+GITHUB = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True)
 
 INSTRUCTIONS = """\
 Branchwarden watches a GitHub organisation's pull requests and branches. Use these tools to find
@@ -42,26 +43,26 @@ def _client():
     try:
         return cli.client(None)
     except cli.Fail as exc:
-        raise RuntimeError(str(exc)) from None
+        raise ToolError(str(exc)) from None
 
 
 def _call(method: str, path: str, body: Optional[dict] = None, params: Optional[dict] = None):
     try:
         return _client().request(method, path, body, params)
     except cli.Fail as exc:
-        raise RuntimeError(str(exc)) from None
+        raise ToolError(str(exc)) from None
 
 
 def _pages(path: str, params: dict, limit: int) -> dict:
     try:
         items = _client().all_pages(path, params, max(1, min(limit, 500)))
     except cli.Fail as exc:
-        raise RuntimeError(str(exc)) from None
+        raise ToolError(str(exc)) from None
     return {"items": items, "count": len(items)}
 
 
-def build() -> FastMCP:
-    mcp = FastMCP("branchwarden", instructions=INSTRUCTIONS)
+def build() -> MCPServer:
+    mcp = MCPServer("branchwarden", instructions=INSTRUCTIONS, version=__version__)
 
     @mcp.tool(annotations=READ)
     def whoami() -> dict:
@@ -143,7 +144,7 @@ def build() -> FastMCP:
         """One repository (owner/name): health flags, open PRs, stale and left-behind branches, review metrics
         over `days` (30, 90 or 180), who reviews there, its CODEOWNERS rules, and where its messages go."""
         if "/" not in full_name:
-            raise RuntimeError("Give the repository as owner/name.")
+            raise ToolError("Give the repository as owner/name.")
         return _call("GET", f"/repos/{full_name}", params={"days": days})
 
     @mcp.tool(annotations=READ)
@@ -177,7 +178,10 @@ def build() -> FastMCP:
 
 
 def run() -> None:
-    _client()                                  # fail now, with the reason, rather than on the first tool call
+    try:
+        cli.client(None)                       # fail now, with the reason, rather than on the first tool call
+    except cli.Fail as exc:
+        raise RuntimeError(str(exc)) from None
     build().run()                              # stdio
 
 

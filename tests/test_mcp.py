@@ -21,12 +21,12 @@ from branchwarden_cli import mcp_server  # noqa: E402
 def test_tools_and_their_annotations():
     tools = {t.name: t for t in asyncio.run(mcp_server.build().list_tools())}
     assert {"my_work", "list_pull_requests", "request_reviewers", "list_branches", "workflows", "start_scan"} <= set(tools)
-    reads = [n for n, t in tools.items() if t.annotations.readOnlyHint]
-    writes = [n for n, t in tools.items() if not t.annotations.readOnlyHint]
+    reads = [n for n, t in tools.items() if t.annotations.read_only_hint]
+    writes = [n for n, t in tools.items() if not t.annotations.read_only_hint]
     assert set(writes) == {"request_reviewers", "snooze_reminders", "ignore_branch", "unignore_branch", "start_scan"}
-    assert tools["request_reviewers"].annotations.openWorldHint is True          # it reaches GitHub
-    assert all(not tools[n].annotations.openWorldHint for n in reads)
-    schema = tools["request_reviewers"].inputSchema["properties"]
+    assert tools["request_reviewers"].annotations.open_world_hint is True          # it reaches GitHub
+    assert all(not tools[n].annotations.open_world_hint for n in reads)
+    schema = tools["request_reviewers"].input_schema["properties"]
     assert schema["dry_run"]["default"] is True                                  # nothing sent by accident
     for t in tools.values():
         assert t.description and len(t.description) > 40, t.name                 # enough for an agent to use
@@ -76,9 +76,9 @@ def session(env: dict, token: str, calls):
 
 
 def payload(result):
-    assert not result.isError, result.content
-    if result.structuredContent is not None:
-        sc = result.structuredContent
+    assert not result.is_error, result.content
+    if result.structured_content is not None:
+        sc = result.structured_content
         return sc.get("result", sc)
     return json.loads(result.content[0].text)
 
@@ -98,12 +98,12 @@ def test_over_stdio(live):
     assert {p["number"] for p in stalled} == {55, 74}
     assert dry["dry_run"] is True and dry["add"] == ["sam"]            # a dry run unless asked otherwise
     assert {w["name"] for w in wf["items"]} == {"Nightly build", "Docs backup"}
-    assert bad.isError and "owner/name" in bad.content[0].text
+    assert bad.is_error and "owner/name" in bad.content[0].text
 
 
 def test_a_read_only_token_cant_act(live):
     async def calls(s):
         return await s.call_tool("start_scan", {}), await s.call_tool("overview", {})
     scan, ov = session(live["env"], live["read"], calls)
-    assert scan.isError and "read-only" in scan.content[0].text
+    assert scan.is_error and "read-only" in scan.content[0].text
     assert payload(ov)["open_prs"] == 16

@@ -589,7 +589,7 @@ def cmd_mcp(args):
         from . import mcp_server
     except ImportError:
         raise Fail('The MCP server needs the mcp extra: pipx install "branchwarden-cli[mcp] @ git+https://github.com/'
-                   'chrisnock-personal/branchwarden#subdirectory=cli" (or pip install "mcp>=1.26,<2").', 1) from None
+                   'chrisnock-personal/branchwarden#subdirectory=cli" (or pip install "mcp>=2.3,<3").', 1) from None
     try:
         mcp_server.run()
     except RuntimeError as exc:

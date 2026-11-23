@@ -16,12 +16,6 @@ updates:
     groups:
       cli:
         patterns: ["*"]
-    ignore:
-      # The MCP server is built on the 1.x SDK; 2.x changed it (CI fails). Remove this
-      # when the server moves to 2.x.
-      - dependency-name: mcp
-        versions: [">=2"]
-
   - package-ecosystem: github-actions    # checkout, setup-python, the docker actions, gitleaks
     directory: /
     schedule: { interval: weekly, day: monday }
