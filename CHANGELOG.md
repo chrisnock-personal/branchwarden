@@ -4,6 +4,25 @@ All notable changes to Branchwarden. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.2] - 2026-11-23
+
+### Fixed
+
+- **Restoring an older backup over a newer database failed.** `restore.sh
+  --force` used `pg_restore --clean`, which can't replace tables that a
+  newer version's tables depend on (such as `api_tokens` on `users`), so
+  going back after an upgrade stopped half way. It now empties the database
+  first. Found by testing the upgrade guide; CI's backup round trip now
+  covers it.
+
+### Added
+
+- **UPGRADING.md:** how to upgrade, especially from 0.1.0 (built on the
+  server) to the published image: back up, keep the old image, switch over,
+  check, add the Actions permission on GitHub, and go back. Tested end to end.
+- **Dependabot:** weekly, grouped update PRs for the Python packages, the
+  CLI, the GitHub Actions and the base image.
+
 ## [0.6.1] - 2026-11-23
 
 ### Added

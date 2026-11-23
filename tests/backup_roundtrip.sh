@@ -44,5 +44,13 @@ with db.get_conn() as c:
 print(f"restored: {n} pull requests, and the sealed webhook URL decrypts")
 PY
 if deploy/restore.sh -i "$work/key.txt" "$file" 2>/dev/null; then echo "restore over data without --force should refuse"; exit 1; fi
+# Going back to an older backup over a newer database: a table the backup doesn't know, depending
+# on one it does (as api_tokens does on users), mustn't stop the restore.
+$COMPOSE exec -T db sh -c 'psql -q -U "${POSTGRES_USER:-branchwarden}" -d "${POSTGRES_DB:-branchwarden}" -c "CREATE TABLE from_the_future (id SERIAL PRIMARY KEY, user_id INTEGER REFERENCES users (id))"'
+deploy/restore.sh -i "$work/key.txt" --force "$file"
+[ "$(count_prs)" = "$before" ] || { echo "restore --force over a newer database lost data"; exit 1; }
+gone=$($COMPOSE exec -T db sh -c 'psql -tA -U "${POSTGRES_USER:-branchwarden}" -d "${POSTGRES_DB:-branchwarden}" -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '"'"'from_the_future'"'"'"')
+[ "${gone// /}" = "0" ] || { echo "the newer table should be gone after restoring an older backup"; exit 1; }
+echo "restored over a newer database with --force"
 for _ in $(seq 1 30); do curl -skf https://localhost:8443/healthz && echo && exit 0; sleep 2; done
 echo "the dashboard didn't come back"; exit 1

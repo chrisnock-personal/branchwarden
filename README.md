@@ -98,7 +98,10 @@ It only loads into an empty Branchwarden, with no token or App set up. While
 it's there, every page says so, nothing is scanned or sent, and connecting
 GitHub is refused until it's removed.
 
-**Updating:** `podman-compose pull && podman-compose up -d`. Each release is
+**Updating:** `podman-compose pull && podman-compose up -d`. From an older
+install, especially one built on the server (0.1.0), follow
+[UPGRADING.md](UPGRADING.md): back up, switch to the published image, add the
+Actions permission, and how to go back. Each release is
 published for amd64 and arm64 as `:<version>`, `:<major>.<minor>` and
 `:latest`. To stay on one, set `BRANCHWARDEN_VERSION` in `.env` (for example
 `0.2`, which gets that version's fixes). Releases and what changed are in

@@ -96,7 +96,11 @@ for name in keys certs; do
 done
 
 echo "Restoring the database…"
-db_exec sh -c 'pg_restore -U "${POSTGRES_USER:-branchwarden}" -d "${POSTGRES_DB:-branchwarden}" --clean --if-exists --no-owner --exit-on-error' \
+# Empty it first, rather than pg_restore --clean: a database from a newer version can have tables
+# that depend on the backup's (its foreign keys), and those would stop the old ones being replaced.
+db_exec sh -c 'psql -q -U "${POSTGRES_USER:-branchwarden}" -d "${POSTGRES_DB:-branchwarden}" -v ON_ERROR_STOP=1 \
+    -c "SET client_min_messages TO warning" -c "DROP SCHEMA public CASCADE" -c "CREATE SCHEMA public"' >/dev/null
+db_exec sh -c 'pg_restore -U "${POSTGRES_USER:-branchwarden}" -d "${POSTGRES_DB:-branchwarden}" --no-owner --exit-on-error' \
     < "$work/db.dump"
 
 echo "Starting Branchwarden…"
