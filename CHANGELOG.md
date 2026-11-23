@@ -4,6 +4,14 @@ All notable changes to Branchwarden. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **Python 3.15** in the image (was 3.12), and CI now runs every test on 3.15.
+- **Updated:** gunicorn 27, and in CI checkout v7, setup-python v7 and gitleaks v3
+  (Dependabot).
+
 ## [0.6.2] - 2026-11-23
 
 ### Fixed
