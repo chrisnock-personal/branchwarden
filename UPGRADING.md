@@ -7,7 +7,7 @@ and `docker` instead of `podman-compose` and `podman`.
 The steps were tested by upgrading a v0.1.0 install (built locally, with
 users, PRs and stored secrets) to v0.6.1, then rolling it back. That test
 found that restoring an older backup over the upgraded database failed;
-0.6.2 fixes it, and CI now restores an older backup over a newer database on
+0.6.2 fixed it, and CI now restores an older backup over a newer database on
 every push.
 
 Run everything from the folder with `docker-compose.yml` and `.env`.
@@ -46,15 +46,15 @@ With a git clone:
 
 ```bash
 git fetch --tags
-git checkout v0.6.2
+git checkout v0.7.0
 ```
 
 Without git, download the release and copy `docker-compose.yml` and the
 `deploy/` folder over yours:
 
 ```bash
-curl -L -o bw.tar.gz https://github.com/chrisnock-personal/branchwarden/archive/refs/tags/v0.6.2.tar.gz
-tar -xzf bw.tar.gz && cp branchwarden-0.6.2/docker-compose.yml . && cp -r branchwarden-0.6.2/deploy .
+curl -L -o bw.tar.gz https://github.com/chrisnock-personal/branchwarden/archive/refs/tags/v0.7.0.tar.gz
+tar -xzf bw.tar.gz && cp branchwarden-0.7.0/docker-compose.yml . && cp -r branchwarden-0.7.0/deploy .
 ```
 
 The running containers aren't touched yet.
@@ -87,7 +87,7 @@ podman tag localhost/branchwarden:latest localhost/branchwarden:before-upgrade
 ## 5. Switch over
 
 ```bash
-echo "BRANCHWARDEN_VERSION=0.6.2" >> .env
+echo "BRANCHWARDEN_VERSION=0.7.0" >> .env
 podman-compose down                            # not "down -v": that would delete the data
 podman-compose pull
 podman-compose up -d
@@ -98,7 +98,7 @@ podman-compose up -d
 ## 6. Check it
 
 ```bash
-curl -sk https://localhost:8443/healthz        # "version":"0.6.2"
+curl -sk https://localhost:8443/healthz        # "version":"0.7.0"
 podman ps                                      # all three "(healthy)" after a minute or so
 podman-compose logs worker | grep -iE "imported|scan \\("
 ```
@@ -126,8 +126,10 @@ Branchwarden picks the new permission up on its next scan.
   shows the commands to install the CLI and connect an AI agent.
 - **Prometheus:** make a read-only service token under *Settings › Users and
   access*, then follow the README's *Prometheus* section.
-- **The Slack morning message:** the rule under *Settings › Channels and
-  reminders*. Each person turns it on from My work.
+- **The morning message:** the rule under *Settings › Channels and
+  reminders*. Each person turns it on from My work and picks Slack or Teams.
+- **MCP over HTTP**, for agents on other machines: `branchwarden mcp --http`
+  (see `cli/README.md`).
 - **A nightly backup:** the systemd timer in the README's *Backups*.
 
 ## Going back

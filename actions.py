@@ -682,35 +682,71 @@ def user_delete(conn, me: int, user_id: int, actor: str) -> Result:
 # ─── The morning message: opting in ─────────────────────────────────────────
 
 def morning_status(conn, login: str) -> dict:
-    p = db.one(conn, "SELECT slack_id, morning, morning_last, morning_error FROM people WHERE login = %s",
-               ((login or "").lower(),))
+    login = (login or "").lower()
+    p = db.one(conn, "SELECT slack_id, morning, morning_to, morning_last, morning_error FROM people WHERE login = %s",
+               (login,))
     rule = rules.load(conn)["morning"]
-    return {"enabled": bool(p and p["morning"]), "slack_id_set": bool(p and p["slack_id"]),
+    meta = settings.secret_meta(conn)
+    return {"enabled": bool(p and p["morning"]), "to": p["morning_to"] if p else "slack",
+            "slack_id_set": bool(p and p["slack_id"]), "token_set": "SLACK_DM_TOKEN" in meta,
+            "teams_set": settings.morning_teams_key(login) in meta,
             "last_sent": p["morning_last"] if p else None, "error": p["morning_error"] if p else None,
-            "rule_on": rule["enabled"], "time": rule["params"].get("time"),
-            "token_set": "SLACK_DM_TOKEN" in settings.secret_meta(conn)}
+            "rule_on": rule["enabled"], "time": rule["params"].get("time")}
 
 
-def set_morning(conn, login: str, enabled: bool, actor: str) -> Result:
+def morning_teams_problem(url: str) -> Optional[str]:
+    if channel_url_problem("teams", url):
+        return ("A Teams Workflows webhook URL starts with https:// and is on logic.azure.com or "
+                "powerplatform.com: make one with the “Post to a chat when a webhook request is received” workflow")
+    return None
+
+
+def set_morning(conn, login: str, enabled: Optional[bool], actor: str, to: Optional[str] = None,
+                teams_url: Optional[str] = None, remove_teams: bool = False) -> Result:
+    """Turn a person's morning message on or off, and say where it goes: Slack (a DM from the bot, which
+    needs their Slack member ID) or Teams (their own Workflows webhook, given here and stored encrypted)."""
     login = (login or "").lower()
     if not login:
         return refused("Give your GitHub login on My work first.", 409)
-    p = db.one(conn, "SELECT slack_id FROM people WHERE login = %s", (login,))
-    if enabled and not (p and p["slack_id"]):
-        return refused("Your Slack member ID isn't known yet: ask an admin to add it under Settings › People.", 409)
-    db.execute(conn, "UPDATE people SET morning = %s, morning_error = NULL WHERE login = %s", (enabled, login))
-    settings.history_add(conn, actor, f"{login}: morning message {'on' if enabled else 'off'}")
-    return done("You'll get a morning message in Slack on working days, when something's waiting on you."
-                if enabled else "No more morning messages.", enabled=enabled)
+    if to is not None and to not in ("slack", "teams"):
+        return refused("Send it to slack or teams.")
+    teams_url = (teams_url or "").strip()
+    if teams_url and morning_teams_problem(teams_url):
+        return refused(morning_teams_problem(teams_url))
+    p = db.one(conn, "SELECT slack_id, morning, morning_to FROM people WHERE login = %s", (login,))
+    to = to or (p["morning_to"] if p else ("teams" if teams_url else "slack"))
+    enabled = bool(p and p["morning"]) if enabled is None else enabled
+    key = settings.morning_teams_key(login)
+    has_teams = bool(teams_url) or (key in settings.secret_meta(conn) and not remove_teams)
+    if enabled and to == "slack" and not (p and p["slack_id"]):
+        return refused("Your Slack member ID isn't known yet: ask an admin to add it under Settings › People, "
+                       "or send it to Teams instead.", 409)
+    if enabled and to == "teams" and not has_teams:
+        return refused("Paste your Teams Workflows webhook URL first.", 409)
+    if teams_url:
+        settings.save(conn, {key: teams_url}, actor)
+    elif remove_teams:
+        settings.save(conn, {key: None}, actor)
+    db.execute(conn, """INSERT INTO people (login, morning, morning_to) VALUES (%s, %s, %s)
+                        ON CONFLICT (login) DO UPDATE SET morning = EXCLUDED.morning, morning_to = EXCLUDED.morning_to,
+                                                          morning_error = NULL""", (login, enabled, to))
+    settings.history_add(conn, actor, f"{login}: morning message {'on' if enabled else 'off'}, to {to.capitalize()}")
+    where = "in Teams, in your chat with Workflows" if to == "teams" else "in Slack"
+    return done(f"You'll get a morning message {where} on working days, when something's waiting on you."
+                if enabled else "No more morning messages.", enabled=enabled, to=to)
 
 
 def morning_now(conn, values: dict, login: str) -> Result:
     p = db.one(conn, "SELECT * FROM people WHERE login = %s", ((login or "").lower(),))
     if not p:
-        return refused("Your Slack member ID isn't known yet: ask an admin to add it under Settings › People.", 409)
+        return refused("Choose where it goes first: your Slack member ID (ask an admin, under Settings › People) "
+                       "or your Teams webhook.", 409)
+    if settings.flag(values, "DEMO_MODE"):
+        return refused("Demo data is loaded, so nothing is sent (the worker sends no morning messages either).", 409)
     r = rules.send_morning(conn, values, p, datetime.now(timezone.utc))
     if r == "sent":
-        return done("Sent: look in Slack, in your messages from the app.")
+        return done("Sent: look in Teams, in your chat with Workflows." if p["morning_to"] == "teams"
+                    else "Sent: look in Slack, in your messages from the app.")
     if r == "nothing":
         return done("Nothing's waiting on you right now, so there's nothing to send.", "info")
     return refused(r.split(": ", 1)[1], 502 if r.startswith("retry") else 409)

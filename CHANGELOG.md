@@ -4,7 +4,7 @@ All notable changes to Branchwarden. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.7.0] - 2026-11-23
 
 ### Added
 
@@ -15,6 +15,17 @@ All notable changes to Branchwarden. The format follows
   - Tokens are checked with Branchwarden, and bad ones are throttled per
     address.
   - Beyond this computer, it needs TLS unless told a proxy does it.
+- **The morning message in Teams.** Each person picks Slack or Teams on My
+  work. For Teams, they paste the URL of their own Workflows flow ("Post to a
+  chat when a webhook request is received"), stored encrypted, and the message
+  arrives as a card in their chat with Workflows. There's no Teams bot to set
+  up, and Slack isn't needed for it. The API's `PUT /my-work/morning` takes
+  `to`, `teams_url` and `remove_teams`.
+
+### Fixed
+
+- **"Send me one now" with demo data** now refuses, as the worker does,
+  rather than sending.
 
 ### Changed
 

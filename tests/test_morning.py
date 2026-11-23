@@ -102,4 +102,45 @@ def test_opting_in(slack):
         assert not r.ok and "Settings › People" in r.message
         assert actions.set_morning(conn, "sam", True, "Sam").ok
         assert actions.morning_status(conn, "sam")["enabled"] is True
-        assert actions.morning_now(conn, __import__("settings").load(conn), "dana").ok
+        settings = __import__("settings")
+        r = actions.morning_now(conn, settings.load(conn), "dana")
+        assert not r.ok and "Demo data" in r.message                          # demo data: nothing goes out
+        settings.save(conn, {"DEMO_MODE": None}, "test")
+        assert actions.morning_now(conn, settings.load(conn), "dana").ok
+
+
+TEAMS_URL = "https://prod-12.westeurope.logic.azure.com/workflows/abc/triggers/manual/paths/invoke?sig=x"
+
+
+def test_teams_instead_of_slack(db_url, monkeypatch):
+    import actions
+    import db
+    import demo
+    import notify
+    import settings
+    with db.get_conn() as conn:
+        demo.load(conn, settings.load(conn))
+        db.execute(conn, "UPDATE rules SET enabled = TRUE WHERE key = 'morning'")
+        settings.save(conn, {"WORK_DAYS": "mon,tue,wed,thu,fri,sat,sun"}, "test")      # no Slack bot token at all
+        r = actions.set_morning(conn, "dana", True, "Dana", to="teams")
+        assert not r.ok and "webhook" in r.message                                       # nothing to send it to yet
+        assert not actions.set_morning(conn, "dana", True, "Dana", to="teams", teams_url="https://example.com/x").ok
+        assert actions.set_morning(conn, "dana", True, "Dana", to="teams", teams_url=TEAMS_URL).ok
+        stored = db.one(conn, "SELECT value, secret FROM settings WHERE key = %s", (settings.morning_teams_key("dana"),))
+        assert stored["secret"] and TEAMS_URL not in stored["value"]                     # encrypted
+        status = actions.morning_status(conn, "dana")
+        assert status["enabled"] and status["to"] == "teams" and status["teams_set"]
+        posted = []
+        monkeypatch.setattr(notify, "post", lambda url, payload: posted.append((url, payload)))
+        monkeypatch.setattr(notify, "slack_api_post", lambda *a: pytest.fail("Slack shouldn't be used"))
+        assert rules.run_morning(conn, settings.load(conn), _at(9, 30)) == 1
+        url, card = posted[0]
+        content = card["attachments"][0]["content"]
+        assert url == TEAMS_URL and content["type"] == "AdaptiveCard"
+        assert "Good morning, Dana" in str(content["body"]) and "3 reviews waiting on you" in str(content["body"])
+        # Switching back to Slack without a member ID is refused; turning it off keeps the URL for later.
+        assert not actions.set_morning(conn, "dana", True, "Dana", to="slack").ok
+        assert actions.set_morning(conn, "dana", False, "Dana").ok
+        assert actions.morning_status(conn, "dana")["teams_set"]
+        assert actions.set_morning(conn, "dana", None, "Dana", remove_teams=True).ok
+        assert not actions.morning_status(conn, "dana")["teams_set"]

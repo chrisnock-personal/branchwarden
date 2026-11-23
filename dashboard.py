@@ -538,10 +538,14 @@ def my_work():
 @app.post("/me/morning")
 def my_morning():
     with db.get_conn() as conn:
-        if request.form.get("test"):
-            r = actions.morning_now(conn, settings.load(conn), g.user.get("github_login") or "")
-        else:
-            r = actions.set_morning(conn, g.user.get("github_login") or "", bool(request.form.get("on")), g.user["name"])
+        action = request.form.get("action", "")
+        login = g.user.get("github_login") or ""
+        # Save what's on the form either way, so "Send me one now" tries a URL just pasted.
+        r = actions.set_morning(conn, login, {"on": True, "off": False}.get(action), g.user["name"],
+                                to=request.form.get("to") or None, teams_url=request.form.get("teams_url"),
+                                remove_teams=bool(request.form.get("remove_teams")))
+        if action == "test" and r.ok:
+            r = actions.morning_now(conn, settings.load(conn), login)
     flash(r.message, r.tone)
     return redirect(url_for("my_work") + "#morning")
 

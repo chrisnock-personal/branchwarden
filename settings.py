@@ -94,8 +94,14 @@ def channel_token_key(channel_id: int) -> str:
     return f"CHANNEL_{channel_id}_TOKEN"
 
 
+def morning_teams_key(login: str) -> str:
+    """A person's own Teams Workflows webhook, for their morning message."""
+    return f"MORNING_TEAMS_{login.lower()}"
+
+
 def is_secret(key: str) -> bool:
-    return key in SECRETS or bool(re.fullmatch(r"CHANNEL_\d+_(URL|TOKEN)", key))
+    return (key in SECRETS or bool(re.fullmatch(r"CHANNEL_\d+_(URL|TOKEN)", key))
+            or key.startswith("MORNING_TEAMS_"))
 
 
 def label(key: str) -> str:
@@ -104,6 +110,8 @@ def label(key: str) -> str:
     m = re.fullmatch(r"CHANNEL_(\d+)_(URL|TOKEN)", key)
     if m:
         return f"Channel {m.group(1)} {'webhook URL' if m.group(2) == 'URL' else 'bot token'}"
+    if key.startswith("MORNING_TEAMS_"):
+        return f"Teams morning webhook for {key[len('MORNING_TEAMS_'):]}"
     return key
 
 

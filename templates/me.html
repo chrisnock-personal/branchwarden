@@ -91,18 +91,28 @@
   </div>
   {% if morning %}
   <section class="card pad" id="morning" aria-labelledby="mm-h" style="max-width: 760px">
-    <h2 id="mm-h">Morning message in Slack</h2>
-    {% if not morning.rule_on or not morning.token_set %}
-      <p class="hint">An admin hasn't switched this on yet (Settings › Channels and reminders › Morning message in Slack).</p>
-    {% elif not morning.slack_id_set %}
-      <p class="hint">Your Slack member ID isn't known yet: ask an admin to add it for <span class="mono">{{ login }}</span> under Settings › People.</p>
+    <h2 id="mm-h">Morning message</h2>
+    {% if not morning.rule_on %}
+      <p class="hint">An admin hasn't switched this on yet (Settings › Channels and reminders › Morning message).</p>
     {% else %}
-      <p class="hint">{% if morning.enabled %}On: working days at {{ morning.time }}, a direct message with the reviews waiting on you and your PRs that need something. Nothing on days when nothing's waiting.{% else %}Off. Turn it on for a direct message on working days at {{ morning.time }} with the reviews waiting on you and your PRs that need something.{% endif %}
+      <p class="hint">{% if morning.enabled %}On: working days at {{ morning.time }}, {{ 'in Teams' if morning.to == 'teams' else 'a direct message in Slack' }}, with the reviews waiting on you and your PRs that need something. Nothing on days when nothing's waiting.{% else %}Off. Turn it on for a message on working days at {{ morning.time }} with the reviews waiting on you and your PRs that need something.{% endif %}
         {% if morning.last_sent %} Last: {{ morning.last_sent.strftime('%a %d %b') }}{% if morning.error %}, which failed: {{ morning.error }}{% endif %}.{% endif %}</p>
-      <form method="post" action="{{ url_for('my_morning') }}" class="inline-form">
+      <form method="post" action="{{ url_for('my_morning') }}">
         {{ csrf() }}
-        {% if morning.enabled %}<button class="btn" type="submit">Turn it off</button>{% else %}<button class="btn primary" type="submit" name="on" value="1">Turn it on</button>{% endif %}
-        <button class="btn" type="submit" name="test" value="1">Send me one now</button>
+        <fieldset class="field"><legend>Send it to</legend>
+          <label class="check"><input type="radio" name="to" value="slack" {{ 'checked' if morning.to != 'teams' }}> Slack
+            <span class="hint">{% if not morning.token_set %}(an admin hasn't set the Slack bot up){% elif not morning.slack_id_set %}(ask an admin to add your Slack member ID for <span class="mono">{{ login }}</span> under Settings › People){% else %}a direct message from the app{% endif %}</span></label>
+          <label class="check"><input type="radio" name="to" value="teams" {{ 'checked' if morning.to == 'teams' }}> Teams
+            <span class="hint">your chat with Workflows</span></label>
+        </fieldset>
+        <div class="field"><label for="mm-teams">Your Teams webhook</label>
+          {% if morning.teams_set %}<div class="stored"><span><strong>Stored</strong></span><label class="check" style="min-height: 0"><input type="checkbox" name="remove_teams" value="1"> Remove</label></div>{% endif %}
+          <input class="input mono" id="mm-teams" name="teams_url" type="password" autocomplete="off" placeholder="{{ 'Paste a new URL to replace it' if morning.teams_set else 'https://….logic.azure.com/…' }}">
+          <span class="help">In Teams: Workflows › Create › “Post to a chat when a webhook request is received”, choose to post to your chat with Workflows (Flow bot), then copy its URL here. Encrypted here and never shown again.</span></div>
+        <div class="inline-form">
+          {% if morning.enabled %}<button class="btn primary" type="submit" name="action" value="save">Save</button><button class="btn" type="submit" name="action" value="off">Turn it off</button>{% else %}<button class="btn primary" type="submit" name="action" value="on">Turn it on</button>{% endif %}
+          <button class="btn" type="submit" name="action" value="test">Send me one now</button>
+        </div>
       </form>
     {% endif %}
   </section>

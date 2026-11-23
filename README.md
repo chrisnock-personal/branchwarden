@@ -240,13 +240,19 @@ GitHub Enterprise Server works too: set the API address to `https://host/api/v3`
   - The channel is told who was picked and why.
 - **Weekly digest:** stale branches and branches left behind, per channel's
   repos, with each branch's last committer @mentioned.
-- **Morning message in Slack** (off by default): on working days at a set
-  time, a direct message to each person who has opted in on My work, with
-  the reviews waiting on them (oldest first) and their PRs that need
-  something. Nothing is sent when nothing's waiting. It needs a Slack bot
-  token with `chat:write` and `im:write` (set in the rule) and each person's
-  Slack member ID under *Settings › People*. "Send me one now" on My work
-  checks it. Slack only: Teams would need a full bot.
+- **Morning message** (off by default): on working days at a set time, a
+  message to each person who has opted in on My work, with the reviews waiting
+  on them (oldest first) and their PRs that need something. Nothing is sent
+  when nothing's waiting. Each person picks where it goes:
+  - **Slack:** a direct message from a bot. It needs a Slack bot token with
+    `chat:write` and `im:write` (set in the rule) and the person's Slack
+    member ID under *Settings › People*.
+  - **Teams:** their own chat. Each person makes a Teams Workflows flow ("Post
+    to a chat when a webhook request is received", posting to their chat with
+    Workflows) and pastes its URL on My work, where it's stored encrypted. No
+    Teams bot or admin setup is needed.
+
+  "Send me one now" on My work checks it.
 - **Weekly MVP post** (off by default): each MVP board's winner and the next
   two, at a set day and time (Fridays 16:00 by default).
   - **Reviews** counts PRs reviewed for other people, not every comment.

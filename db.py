@@ -309,6 +309,9 @@ ALTER TABLE repos ADD COLUMN IF NOT EXISTS health_at TIMESTAMPTZ;
 ALTER TABLE people ADD COLUMN IF NOT EXISTS morning BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE people ADD COLUMN IF NOT EXISTS morning_last DATE;
 ALTER TABLE people ADD COLUMN IF NOT EXISTS morning_error TEXT;
+-- Where it goes: 'slack' (a DM from the bot) or 'teams' (the person's own Workflows webhook,
+-- stored encrypted as the setting MORNING_TEAMS_<login>).
+ALTER TABLE people ADD COLUMN IF NOT EXISTS morning_to TEXT NOT NULL DEFAULT 'slack';
 
 -- Ticket keys found in a PR's description (the text itself isn't kept).
 ALTER TABLE pull_requests ADD COLUMN IF NOT EXISTS body_tickets JSONB NOT NULL DEFAULT '[]';

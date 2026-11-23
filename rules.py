@@ -62,7 +62,7 @@ RULES = (
          {**REMINDER_DEFAULTS, "after": 7, "unit": "days", "repeat": 7, "max": 2}, enabled=False),
     Rule("digest", "digest", "Weekly stale-branch digest",
          {"day": "mon", "time": "09:00", "target": "all", "mention": True, "limit": 10}),
-    Rule("morning", "dm", "Morning message in Slack",
+    Rule("morning", "dm", "Morning message",
          {"time": "09:15", "target": "people"}, enabled=False),
     Rule("mvp", "post", "Weekly MVP post",
          {"day": "fri", "time": "16:00", "target": "all", "mention": True}, enabled=False),
@@ -650,7 +650,7 @@ def run_mvp_post(conn, values: dict, now: Optional[datetime] = None, force: bool
     return queued
 
 
-# ─── Morning message in Slack ───────────────────────────────────────────────
+# ─── Morning message (Slack or Teams) ───────────────────────────────────────
 
 def morning_message(work: dict, name: str, link: Optional[str], tz=timezone.utc) -> Optional[dict]:
     """One person's morning DM, or None when nothing's waiting on them."""
@@ -678,20 +678,30 @@ def morning_message(work: dict, name: str, link: Optional[str], tz=timezone.utc)
 
 
 def send_morning(conn, values: dict, person: dict, now: datetime) -> str:
-    """Send one person's morning DM now. Returns "sent", "nothing", "retry: …" (Slack busy or
-    unreachable: worth another go) or "failed: …" (a setup problem, shown to the person)."""
-    token = values.get("SLACK_DM_TOKEN")
-    if not token:
-        return "failed: no Slack bot token is set (Settings › Channels and reminders › Morning message)"
-    if not person.get("slack_id"):
-        return "failed: no Slack member ID for this login (Settings › People)"
+    """Send one person's morning message now, to Slack or Teams as they chose. Returns "sent",
+    "nothing", "retry: …" (Slack or Teams busy or unreachable: worth another go) or "failed: …"
+    (a setup problem, shown to the person)."""
+    teams = person.get("morning_to") == "teams"
+    if teams:
+        url = values.get(settings.morning_teams_key(person["login"]))
+        if not url:
+            return "failed: no Teams webhook is set (My work › Morning message)"
+    else:
+        token = values.get("SLACK_DM_TOKEN")
+        if not token:
+            return "failed: no Slack bot token is set (Settings › Channels and reminders › Morning message)"
+        if not person.get("slack_id"):
+            return "failed: no Slack member ID for this login (Settings › People)"
     work = data.my_work(conn, person["login"], values, now)
     msg = morning_message(work, person.get("name") or person["login"], _link(values, "/me"))
     if not msg:
         return "nothing"
-    payload = {**notify.slack_message(msg, {}), "channel": person["slack_id"], "unfurl_links": False}
     try:
-        notify.slack_api_post(token, payload)
+        if teams:
+            notify.post(url, notify.teams_card(msg, {}))
+        else:
+            notify.slack_api_post(token, {**notify.slack_message(msg, {}), "channel": person["slack_id"],
+                                          "unfurl_links": False})
     except notify.RetryLater as exc:
         return f"retry: {exc}"
     except notify.PermanentFailure as exc:
@@ -703,7 +713,7 @@ def run_morning(conn, values: dict, now: Optional[datetime] = None, force_login:
     """At the rule's time on working days, each opted-in person's DM, once a day. Returns how many were sent."""
     now = now or datetime.now(timezone.utc)
     rule = load(conn)["morning"]
-    if not rule["enabled"] or not values.get("SLACK_DM_TOKEN"):
+    if not rule["enabled"]:
         return 0
     hours = work_hours(values)
     local = now.astimezone(hours.tz)
@@ -715,7 +725,8 @@ def run_morning(conn, values: dict, now: Optional[datetime] = None, force_login:
     if local.weekday() not in hours.days or local.time() < at:
         return 0
     sent = 0
-    for person in db.rows(conn, """SELECT * FROM people WHERE morning AND slack_id <> ''
+    for person in db.rows(conn, """SELECT * FROM people WHERE morning
+                                    AND (morning_to = 'teams' OR slack_id <> '')
                                     AND (morning_last IS NULL OR morning_last < %s)""", (local.date(),)):
         result = send_morning(conn, values, person, now)
         if result.startswith("retry"):

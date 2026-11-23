@@ -64,7 +64,7 @@ The same, machine-readable: `GET /api/v1/openapi.json`.
 | | Path | Who | What |
 |---|---|---|---|
 | GET | `/my-work` | viewer | What's waiting on the token's owner: reviews, their PRs, branches, snoozes |
-| PUT | `/my-work/morning` | anyone (not read-only) | Turn the token owner's Slack morning message on or off (body: `enabled`) |
+| PUT | `/my-work/morning` | anyone (not read-only) | Turn the token owner's morning message on or off, and say where it goes (body: `enabled`, `to`, `teams_url`, `remove_teams`) |
 | POST | `/my-work/morning/test` | anyone (not read-only) | Send the token owner's morning message now |
 
 ## Metrics

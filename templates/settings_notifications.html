@@ -133,11 +133,11 @@
         <p class="hint">Runs in working hours only, once each time a PR is left without a reviewer. It writes to GitHub, so it's off until you switch it on.</p>
       {% elif r.kind == 'dm' %}
         <div class="inline-form">On working days at <input class="input num" name="time" value="{{ p.time }}" aria-label="Time"> (working-hours time zone)</div>
-        <div class="field"><label for="dm-token">Slack bot token</label>
+        <div class="field"><label for="dm-token">Slack bot token <span class="hint">(for Slack only: Teams needs nothing here)</span></label>
           {% if dm_token %}<div class="stored"><span><strong>Stored</strong> · {{ dm_token }}</span><label class="check" style="min-height: 0"><input type="checkbox" name="remove_token" value="1"> Remove</label></div>{% endif %}
           <input class="input mono" id="dm-token" name="slack_token" type="password" autocomplete="off" placeholder="{{ 'Paste a new token to replace it' if dm_token else 'xoxb-…' }}">
           <span class="help">A Slack app's Bot User OAuth Token with the <span class="mono">chat:write</span> and <span class="mono">im:write</span> scopes. Encrypted here and never shown again. It can be the same app as a channel's.</span></div>
-        <p class="hint">Each person opts in on My work. It needs their Slack member ID under Settings › People. Nothing is sent when nothing's waiting on them.</p>
+        <p class="hint">Each person opts in on My work and picks where it goes. Slack: a direct message from this bot, which needs their Slack member ID under Settings › People. Teams: their own chat, through a Workflows webhook they make and paste in themselves. Nothing is sent when nothing's waiting on them.</p>
       {% elif r.kind in ('digest', 'post') %}
         <div class="inline-form">Every <select name="day" aria-label="Day">{% for d in days %}<option value="{{ d }}" {{ 'selected' if p.day == d }}>{{ d|capitalize }}day</option>{% endfor %}</select>
           at <input class="input num" name="time" value="{{ p.time }}" aria-label="Time"> (working-hours time zone), to <select name="target" aria-label="Where">{% include "_targets.html" %}</select></div>

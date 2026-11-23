@@ -528,14 +528,21 @@ def my_work():
                "snoozed": [{"pr": p["id"], "until": p["snooze"]["until"], "by": p["snooze"]["by_name"]} for p in w["snoozed"]]})
 
 
-@endpoint("PUT", "/my-work/morning", "self", "Turn the token owner's Slack morning message on or off", "me",
-          body={"enabled": ("boolean", "On or off")})
+@endpoint("PUT", "/my-work/morning", "self", "Turn the token owner's morning message on or off, and say where it goes",
+          "me", body={"enabled": ("boolean", "On or off (left out: as it is)"),
+                      "to": ("string", "slack (a DM from the bot) or teams (your own Workflows webhook)"),
+                      "teams_url": ("string", "Your Teams Workflows webhook URL (stored encrypted, never shown)"),
+                      "remove_teams": ("boolean", "Forget the stored Teams webhook URL")})
 def my_morning():
     login = (g.api.get("github_login") or "").lower()
     if g.api["service"] or not login:
         return error(409, "no_github_login", "This needs a person's token, with their GitHub login set.")
+    b = body()
+    enabled = b.get("enabled")
     with db.get_conn() as conn:
-        return result(actions.set_morning(conn, login, bool(body().get("enabled")), actor()))
+        return result(actions.set_morning(conn, login, None if enabled is None else bool(enabled), actor(),
+                                          to=b.get("to") or None, teams_url=b.get("teams_url") or None,
+                                          remove_teams=bool(b.get("remove_teams"))))
 
 
 @endpoint("POST", "/my-work/morning/test", "self", "Send the token owner's morning message now", "me")
