@@ -107,3 +107,101 @@ def test_a_read_only_token_cant_act(live):
     scan, ov = session(live["env"], live["read"], calls)
     assert scan.is_error and "read-only" in scan.content[0].text
     assert payload(ov)["open_prs"] == 16
+
+
+# ─── Over HTTP (branchwarden mcp --http) ────────────────────────────────────
+
+def _gate_answer(headers: list, client=("203.0.113.9", 5000), checks=None):
+    """Send one request through TokenGate (no app behind it) and return (status, body)."""
+    gate = mcp_server.TokenGate(None, "https://bw.example", None)
+    if checks is not None:
+        async def check(token):
+            checks.append(token)
+            return (3, "That token isn't valid.")
+        gate._check = check
+    out = []
+
+    async def send(msg):
+        out.append(msg)
+
+    async def go():
+        await gate({"type": "http", "headers": headers, "client": client}, None, send)
+    asyncio.run(go())
+    return out[0]["status"], json.loads(out[1]["body"]), dict(out[0]["headers"])
+
+
+def test_http_needs_a_token_and_throttles_bad_ones():
+    status, body, headers = _gate_answer([])
+    assert status == 401 and "bwt_" in body["error"] and headers[b"www-authenticate"].startswith(b"Bearer")
+    assert _gate_answer([(b"authorization", b"Basic eDp5")])[0] == 401
+    gate = mcp_server.TokenGate(None, "https://bw.example", None)
+    for _ in range(mcp_server.FAILS_PER_MINUTE):
+        gate._failed("203.0.113.9")
+    assert gate._throttled("203.0.113.9") and not gate._throttled("203.0.113.10")
+
+
+def test_http_wont_send_tokens_in_the_clear():
+    with pytest.raises(RuntimeError, match="in the clear"):
+        mcp_server.run_http(host="0.0.0.0")
+    with pytest.raises(RuntimeError, match="both"):
+        mcp_server.run_http(host="0.0.0.0", certfile="c.pem")
+
+
+def _serve_http(env: dict, monkeypatch):
+    import socket
+    import threading
+
+    import uvicorn
+    monkeypatch.setenv("BRANCHWARDEN_CLI_ALLOW_HTTP", "1")
+    app = mcp_server.http_app(env["BRANCHWARDEN_URL"], None)
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    threading.Thread(target=server.run, daemon=True).start()
+    for _ in range(100):
+        if server.started:
+            break
+        __import__("time").sleep(0.05)
+    return server, f"http://127.0.0.1:{port}/mcp"
+
+
+def http_session(url: str, token: str, calls):
+    from mcp import ClientSession
+    from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
+
+    async def go():
+        async with create_mcp_http_client(headers={"Authorization": f"Bearer {token}"}) as http:
+            async with streamable_http_client(url, http_client=http) as streams:
+                async with ClientSession(streams[0], streams[1]) as s:
+                    await s.initialize()
+                    return await calls(s)
+    return asyncio.run(go())
+
+
+def test_over_http_each_client_with_its_own_token(live, monkeypatch):
+    import urllib.error
+    import urllib.request
+    server, url = _serve_http(live["env"], monkeypatch)
+    try:
+        async def as_writer(s):
+            return payload(await s.call_tool("my_work", {})), await s.call_tool("start_scan", {})
+        work, scan = http_session(url, live["write"], as_writer)
+        assert work["login"] == "dana" and not scan.is_error
+
+        async def as_reader(s):
+            return await s.call_tool("start_scan", {}), payload(await s.call_tool("overview", {}))
+        scan, ov = http_session(url, live["read"], as_reader)
+        assert scan.is_error and "read-only" in scan.content[0].text     # the reader's own token was used
+        assert ov["open_prs"] == 16
+
+        for token in (None, "bwt_not-a-real-token"):
+            req = urllib.request.Request(url, data=b"{}", method="POST", headers={"Content-Type": "application/json"})
+            if token:
+                req.add_header("Authorization", f"Bearer {token}")
+            with pytest.raises(urllib.error.HTTPError) as err:
+                urllib.request.urlopen(req, timeout=10)
+            assert err.value.code == 401
+    finally:
+        server.should_exit = True

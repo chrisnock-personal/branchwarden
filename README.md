@@ -361,6 +361,9 @@ branchwarden me
 - **MCP:** `branchwarden mcp` serves the same as tools for AI agents (Claude
   Code, Claude Desktop): read-only tools marked as such, reviewer requests a
   dry run unless asked, and a read-only token keeps an agent to looking.
+  `branchwarden mcp --http` serves them over HTTP for agents on other
+  machines. Each client sends its own API token, and the server keeps none (see
+  [cli/README.md](cli/README.md#over-http-for-agents-on-other-machines)).
 - **Exit codes** say what happened, so scripts can act on them.
 
 ## Roles

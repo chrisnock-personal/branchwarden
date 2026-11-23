@@ -107,6 +107,41 @@ certificate).
 - **The token decides:** with a read-only token, the agent can look but not
   change anything. The server refuses, whatever the agent tries.
 
+### Over HTTP, for agents on other machines
+
+`branchwarden mcp --http` serves the same tools over MCP's streamable HTTP, so
+agents that can't run a command on your computer can still connect. It's
+usually run on the Branchwarden server itself, or next to it.
+
+- **It keeps no token of its own.** Each client sends its own Branchwarden API
+  token (`Authorization: Bearer bwt_…`), which is checked with Branchwarden and
+  used for that client's calls only. Each agent gets what its own token allows.
+- **Bad tokens:** a request without a valid token gets 401. Thirty bad tokens a
+  minute from one address get it told to wait.
+- **A revoked token** stops working within a minute.
+- **TLS:** beyond `127.0.0.1` it needs `--certfile` and `--keyfile`, so tokens
+  aren't sent in the clear. Use `--allow-http` only when a proxy in front of it
+  does TLS.
+- **Host names:** `--allowed-host` makes it answer only requests addressed to
+  the names you give.
+
+It needs to know where Branchwarden is, but not a token: either sign in once
+with `branchwarden login`, or set `BRANCHWARDEN_URL` (and
+`BRANCHWARDEN_FINGERPRINT` for a self-signed certificate).
+
+```bash
+BRANCHWARDEN_URL=https://branchwarden.example.com:8443 \
+  branchwarden mcp --http --host 0.0.0.0 --port 8765 \
+  --certfile /etc/branchwarden/tls.crt --keyfile /etc/branchwarden/tls.key
+```
+
+Then, on the agent's machine (Claude Code shown):
+
+```bash
+claude mcp add --transport http branchwarden https://branchwarden.example.com:8765/mcp \
+  --header "Authorization: Bearer bwt_…"
+```
+
 ## For AI agents using the CLI
 
 `branchwarden --help` and each command's `--help` say everything a command

@@ -591,7 +591,11 @@ def cmd_mcp(args):
         raise Fail('The MCP server needs the mcp extra: pipx install "branchwarden-cli[mcp] @ git+https://github.com/'
                    'chrisnock-personal/branchwarden#subdirectory=cli" (or pip install "mcp>=2.3,<3").', 1) from None
     try:
-        mcp_server.run()
+        if args.http:
+            mcp_server.run_http(args.host, args.port, args.path, args.certfile, args.keyfile, args.allow_http,
+                                args.allowed_host)
+        else:
+            mcp_server.run()
     except RuntimeError as exc:
         raise Fail(str(exc), 3) from None
 
@@ -749,8 +753,19 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("name", nargs="?", help="set: the settings section, or the rule's key")
     s.add_argument("pairs", nargs="*", metavar="KEY=VALUE", help="set: what to change, e.g. STALE_DAYS=45")
 
-    add("mcp", cmd_mcp, "run as an MCP server over stdio, for AI agents such as Claude Code "
-                        "(signs in like the CLI; needs the mcp extra)")
+    s = add("mcp", cmd_mcp, "run as an MCP server for AI agents such as Claude Code: over stdio (signs in like "
+                            "the CLI), or --http for agents elsewhere (each sends its own API token); needs the "
+                            "mcp extra")
+    s.add_argument("--http", action="store_true", help="serve MCP over HTTP (streamable HTTP) instead of stdio")
+    s.add_argument("--host", default="127.0.0.1", help="--http: the address to listen on (127.0.0.1)")
+    s.add_argument("--port", type=int, default=8765, help="--http: the port (8765)")
+    s.add_argument("--path", default="/mcp", help="--http: the URL path (/mcp)")
+    s.add_argument("--certfile", help="--http: TLS certificate (PEM); needed beyond this computer")
+    s.add_argument("--keyfile", help="--http: TLS private key (PEM)")
+    s.add_argument("--allow-http", action="store_true",
+                   help="--http: allow plain HTTP beyond this computer, when a proxy in front does TLS")
+    s.add_argument("--allowed-host", action="append", metavar="HOST[:PORT]",
+                   help="--http: only answer requests addressed to this name (repeatable)")
 
     s = add("api", cmd_api, "call any API endpoint and print its JSON (see docs/api.md)")
     s.add_argument("method", help="GET, POST, PATCH, PUT or DELETE")

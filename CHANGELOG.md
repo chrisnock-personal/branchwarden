@@ -6,6 +6,16 @@ All notable changes to Branchwarden. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **MCP over HTTP:** `branchwarden mcp --http` serves the MCP tools over
+  streamable HTTP, for agents on other machines.
+  - Each client sends its own Branchwarden API token, and the server keeps
+    none.
+  - Tokens are checked with Branchwarden, and bad ones are throttled per
+    address.
+  - Beyond this computer, it needs TLS unless told a proxy does it.
+
 ### Changed
 
 - **Python 3.15** in the image (was 3.12), and CI now runs every test on 3.15.
