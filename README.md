@@ -565,6 +565,10 @@ Two GitHub Actions workflows, both in `.github/workflows/`:
   `:X.Y.Z`, `:X.Y` and `:latest`. It refuses a tag whose commit hasn't passed
   `ci.yml`.
 
+**Dependabot** (`.github/dependabot.yml`) opens update PRs each Monday,
+grouped, for the Python packages (the app's and the CLI's), the GitHub
+Actions and the container's base image; CI tests each before it's merged.
+
 The version is in `version.py`. It's shown at the foot of every page, in
 `/healthz`, and in the User-Agent sent to GitHub. Each release gets a
 [CHANGELOG](CHANGELOG.md) entry, a `vX.Y.Z` tag and a GitHub release. A

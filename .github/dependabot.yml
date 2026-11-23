@@ -1,0 +1,29 @@
+# Weekly update PRs, grouped so they come as a few PRs, not dozens. CI tests each
+# one (tests, pip-audit, gitleaks, the backup round trip) before it's merged.
+version: 2
+updates:
+  - package-ecosystem: pip               # requirements.txt and requirements-dev.txt
+    directory: /
+    schedule: { interval: weekly, day: monday }
+    groups:
+      python:
+        patterns: ["*"]
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: pip               # the CLI's pyproject.toml (keyring, the mcp extra)
+    directory: /cli
+    schedule: { interval: weekly, day: monday }
+    groups:
+      cli:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions    # checkout, setup-python, the docker actions, gitleaks
+    directory: /
+    schedule: { interval: weekly, day: monday }
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: docker            # the Dockerfile's python base image
+    directory: /
+    schedule: { interval: weekly, day: monday }
