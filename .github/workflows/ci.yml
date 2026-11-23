@@ -30,7 +30,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: "3.15"
       - run: pip install -r requirements-dev.txt "./cli[mcp]"
       - name: Chromium for the browser test
         run: python -m playwright install --with-deps chromium

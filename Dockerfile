@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.15-slim
 
 LABEL org.opencontainers.image.title="Branchwarden" \
       org.opencontainers.image.description="Watches GitHub pull requests and branches, and reminds teams in Teams and Slack"
