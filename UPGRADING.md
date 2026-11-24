@@ -5,10 +5,12 @@ and a way back. Written for podman-compose; with Docker, use `docker compose`
 and `docker` instead of `podman-compose` and `podman`.
 
 The steps were tested by upgrading a v0.1.0 install (built locally, with
-users, PRs and stored secrets) to v0.6.1, then rolling it back. That test
-found that restoring an older backup over the upgraded database failed;
-0.6.2 fixed it, and CI now restores an older backup over a newer database on
-every push.
+users, PRs and stored secrets) and rolling it back:
+- **To v0.6.1:** that test found that restoring an older backup over the
+  upgraded database failed. 0.6.2 fixed it, and CI now restores an older
+  backup over a newer database on every push.
+- **To v0.8.0, on 2026-11-24:** every step as written, then the way back,
+  with no changes needed.
 
 Run everything from the folder with `docker-compose.yml` and `.env`.
 
@@ -128,8 +130,9 @@ Branchwarden picks the new permission up on its next scan.
   access*, then follow the README's *Prometheus* section.
 - **The morning message:** the rule under *Settings › Channels and
   reminders*. Each person turns it on from My work and picks Slack or Teams.
-- **MCP over HTTP**, for agents on other machines: `branchwarden mcp --http`
-  (see `cli/README.md`).
+- **The MCP service**, for AI agents on other machines:
+  `podman-compose --profile mcp up -d`. It listens on 8765 (see the README's
+  *The MCP service*).
 - **A nightly backup:** the systemd timer in the README's *Backups*.
 
 ## Going back
