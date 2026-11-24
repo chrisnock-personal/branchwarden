@@ -41,6 +41,8 @@ def slack(db_url, monkeypatch):
         db.execute(conn, "UPDATE people SET slack_id = 'U01SAM0001', morning = FALSE WHERE login = 'sam'")
         db.execute(conn, "UPDATE people SET slack_id = 'U01PRIYA01', morning = TRUE WHERE login = 'priya'")
         db.execute(conn, "INSERT INTO people (login, name, slack_id, morning) VALUES ('quiet', 'Quinn', 'U01QUIET01', TRUE)")
+        for login in ("dana", "sam", "priya", "quiet"):                  # each opted in from their own account
+            _account(conn, login)
         db.execute(conn, "UPDATE rules SET enabled = TRUE WHERE key = 'morning'")
         settings.save(conn, {"SLACK_DM_TOKEN": "xoxb-test", "WORK_DAYS": "mon,tue,wed,thu,fri,sat,sun"}, "test")
     sent = []
@@ -53,6 +55,19 @@ def slack(db_url, monkeypatch):
         return "1.0"
     monkeypatch.setattr(notify, "slack_api_post", post)
     return sent, answer
+
+
+def _account(conn, login, github=False):
+    """An account with this GitHub login, owning the person's morning message (as opting in on My work does)."""
+    import db
+    import settings
+    uid = settings.create_user(conn, f"{login}-{__import__('uuid').uuid4().hex[:8]}@example.com", login.title(), "member", "test",
+                               password="a-long-test-password").user_id
+    settings.set_my_login(conn, uid, login)
+    if github:
+        db.execute(conn, "UPDATE users SET github_id = %s WHERE id = %s", (900000 + uid, uid))
+    db.execute(conn, "UPDATE people SET morning_user = COALESCE(morning_user, %s) WHERE login = %s", (uid, login))
+    return uid
 
 
 def _at(hour, minute=0, days=0):
@@ -122,10 +137,12 @@ def test_teams_instead_of_slack(db_url, monkeypatch):
         demo.load(conn, settings.load(conn))
         db.execute(conn, "UPDATE rules SET enabled = TRUE WHERE key = 'morning'")
         settings.save(conn, {"WORK_DAYS": "mon,tue,wed,thu,fri,sat,sun"}, "test")      # no Slack bot token at all
-        r = actions.set_morning(conn, "dana", True, "Dana", to="teams")
+        uid = _account(conn, "dana")
+        r = actions.set_morning(conn, "dana", True, "Dana", to="teams", user_id=uid)
         assert not r.ok and "webhook" in r.message                                       # nothing to send it to yet
-        assert not actions.set_morning(conn, "dana", True, "Dana", to="teams", teams_url="https://example.com/x").ok
-        assert actions.set_morning(conn, "dana", True, "Dana", to="teams", teams_url=TEAMS_URL).ok
+        assert not actions.set_morning(conn, "dana", True, "Dana", to="teams", teams_url="https://example.com/x",
+                                       user_id=uid).ok
+        assert actions.set_morning(conn, "dana", True, "Dana", to="teams", teams_url=TEAMS_URL, user_id=uid).ok
         stored = db.one(conn, "SELECT value, secret FROM settings WHERE key = %s", (settings.morning_teams_key("dana"),))
         assert stored["secret"] and TEAMS_URL not in stored["value"]                     # encrypted
         status = actions.morning_status(conn, "dana")
@@ -144,3 +161,51 @@ def test_teams_instead_of_slack(db_url, monkeypatch):
         assert actions.morning_status(conn, "dana")["teams_set"]
         assert actions.set_morning(conn, "dana", None, "Dana", remove_teams=True).ok
         assert not actions.morning_status(conn, "dana")["teams_set"]
+
+
+def test_only_the_account_that_set_it_up(db_url, monkeypatch):
+    """A message stops when its account goes, and another account typing the same login can't redirect it."""
+    import actions
+    import db
+    import demo
+    import notify
+    import settings
+    with db.get_conn() as conn:
+        demo.load(conn, settings.load(conn))
+        db.execute(conn, "UPDATE rules SET enabled = TRUE WHERE key = 'morning'")
+        settings.save(conn, {"WORK_DAYS": "mon,tue,wed,thu,fri,sat,sun"}, "test")
+        dana = _account(conn, "dana")
+        assert actions.set_morning(conn, "dana", True, "Dana", to="teams", teams_url=TEAMS_URL, user_id=dana).ok
+        # Someone else types "dana" on My work and tries to send it to their own chat, or switch it off.
+        other = _account(conn, "dana")
+        r = actions.set_morning(conn, "dana", True, "Other", to="teams", teams_url=TEAMS_URL + "-theirs", user_id=other)
+        assert not r.ok and r.status == 403
+        assert not actions.set_morning(conn, "dana", False, "Other", user_id=other).ok
+        assert settings.load(conn)[settings.morning_teams_key("dana")] == TEAMS_URL
+        # Signing in with GitHub as dana proves it: that account may take it over.
+        real = _account(conn, "dana", github=True)
+        assert actions.set_morning(conn, "dana", True, "Dana", to="teams", teams_url=TEAMS_URL, user_id=real).ok
+        posted = []
+        monkeypatch.setattr(notify, "post", lambda url, payload: posted.append(url))
+        settings.delete_user(conn, dana, "test")                    # the first account going changes nothing now
+        assert rules.run_morning(conn, settings.load(conn), _at(9, 30)) == 1
+        db.execute(conn, "UPDATE people SET morning_last = NULL")
+        settings.delete_user(conn, real, "test")                    # the owner's account removed: nothing more is sent
+        assert rules.run_morning(conn, settings.load(conn), _at(9, 30)) == 0
+        assert len(posted) == 1
+
+
+def test_opt_ins_from_before_keep_going_after_upgrading(db_url):
+    """Opted in before accounts owned the message: on upgrade, it's linked to the account with that login."""
+    import db
+    import settings
+    with db.get_conn() as conn:
+        uid = settings.create_user(conn, "old@example.com", "Old Timer", "member", "test",
+                                   password="a-long-test-password").user_id
+        settings.set_my_login(conn, uid, "oldtimer")
+        db.execute(conn, "INSERT INTO people (login, slack_id, morning) VALUES ('oldtimer', 'U0OLD00001', TRUE)")
+        db.execute(conn, "INSERT INTO people (login, slack_id, morning) VALUES ('nobody', 'U0NOBODY01', TRUE)")
+    db.init_schema()                                                     # what starting the new version does
+    with db.get_conn() as conn:
+        assert db.one(conn, "SELECT morning_user FROM people WHERE login = 'oldtimer'")["morning_user"] == uid
+        assert db.one(conn, "SELECT morning_user FROM people WHERE login = 'nobody'")["morning_user"] is None

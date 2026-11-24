@@ -4,6 +4,32 @@ All notable changes to Branchwarden. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.1] - 2026-11-24
+
+Fixes from a bug hunt.
+
+### Fixed
+
+- **The morning message now belongs to the account that set it up.**
+  - **Removed users:** before, it kept going after an admin removed the
+    account, or after GitHub sign-in refused it.
+  - **Claimed logins:** a password account could type someone else's GitHub
+    login on My work and switch their message off, or send it to its own Teams
+    chat.
+  - **Now:** it's sent only while the owning account exists and still has
+    that login. A refused GitHub sign-in switches it off. Another account
+    can't change it, unless it signs in with GitHub as that login.
+  - **On upgrade:** existing opt-ins are linked to the account with that
+    login, so nobody's message stops.
+- **The API refuses anything but JSON `true` or `false` for its booleans.**
+  Before, a string such as `"false"` counted as true. For example,
+  `{"notify": "false"}` told the channels, and `{"restore_previous":
+  "false"}` put the previous certificate back.
+- **MCP over HTTP: an outage isn't counted as bad tokens.** Before, when
+  Branchwarden was briefly unreachable, every client's check counted toward
+  the bad-token throttle, so genuine clients could be turned away for a minute
+  afterwards.
+
 ## [0.8.0] - 2026-11-24
 
 ### Added

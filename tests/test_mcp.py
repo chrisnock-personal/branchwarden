@@ -219,3 +219,22 @@ def test_http_bad_tokens_in_all_stay_under_branchwarden_s_limit():
     known = "bwt_known"
     gate.good[__import__("hashlib").sha256(known.encode()).hexdigest()] = __import__("time").monotonic() + 60
     assert gate._known(known) and not gate._known("bwt_new")        # a known token still gets through
+
+
+def test_http_an_outage_isnt_counted_as_bad_tokens():
+    async def down(token):
+        return (6, "Can't check the token with Branchwarden: can't reach it")
+    gate = mcp_server.TokenGate(None, "https://bw.example", None)
+    gate._check = down
+    out = []
+
+    async def send(msg):
+        out.append(msg)
+
+    async def go():
+        for _ in range(mcp_server.FAILS_PER_MINUTE + 5):
+            await gate({"type": "http", "headers": [(b"authorization", b"Bearer bwt_real")],
+                        "client": ("203.0.113.9", 1)}, None, send)
+    asyncio.run(go())
+    assert {m["status"] for m in out if m["type"] == "http.response.start"} == {502}
+    assert not gate._throttled("203.0.113.9") and not gate._throttled(mcp_server.ALL)

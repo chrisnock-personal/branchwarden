@@ -200,6 +200,7 @@ def github_callback():
             if known:
                 apitokens.revoke_all(conn, known["id"], "Branchwarden",
                                      f"{who['login']} is no longer in any GitHub role list")
+                db.execute(conn, "UPDATE people SET morning = FALSE WHERE morning_user = %s", (known["id"],))
         return redirect(url_for("admin.login", error=f"{who['login']} isn't allowed in. Ask an admin to add you "
                                                      "or one of your GitHub teams under Users and access."))
     with db.get_conn() as conn:

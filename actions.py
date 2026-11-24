@@ -702,12 +702,23 @@ def morning_teams_problem(url: str) -> Optional[str]:
 
 
 def set_morning(conn, login: str, enabled: Optional[bool], actor: str, to: Optional[str] = None,
-                teams_url: Optional[str] = None, remove_teams: bool = False) -> Result:
+                teams_url: Optional[str] = None, remove_teams: bool = False,
+                user_id: Optional[int] = None) -> Result:
     """Turn a person's morning message on or off, and say where it goes: Slack (a DM from the bot, which
-    needs their Slack member ID) or Teams (their own Workflows webhook, given here and stored encrypted)."""
+    needs their Slack member ID) or Teams (their own Workflows webhook, given here and stored encrypted).
+
+    user_id is the account doing it, which then owns it: another account that has typed the same login
+    on My work can't change it, unless it signs in with GitHub as that login (which proves it's theirs)."""
     login = (login or "").lower()
     if not login:
         return refused("Give your GitHub login on My work first.", 409)
+    owner = db.one(conn, """SELECT u.id FROM people p JOIN users u ON u.id = p.morning_user
+                             WHERE p.login = %s AND LOWER(u.github_login) = p.login""", (login,))
+    if owner and user_id is not None and owner["id"] != user_id:
+        me = settings.user(conn, user_id)
+        if not (me and me["via_github"] and (me["github_login"] or "").lower() == login):
+            return refused(f"Another account set up the morning message for {login}, so only it can change it. "
+                           "Signing in with GitHub as that login lets you take it over.", 403)
     if to is not None and to not in ("slack", "teams"):
         return refused("Send it to slack or teams.")
     teams_url = (teams_url or "").strip()
@@ -727,10 +738,13 @@ def set_morning(conn, login: str, enabled: Optional[bool], actor: str, to: Optio
         settings.save(conn, {key: teams_url}, actor)
     elif remove_teams:
         settings.save(conn, {key: None}, actor)
-    db.execute(conn, """INSERT INTO people (login, morning, morning_to) VALUES (%s, %s, %s)
+    before = (bool(p and p["morning"]), p["morning_to"] if p else None)
+    db.execute(conn, """INSERT INTO people (login, morning, morning_to, morning_user) VALUES (%s, %s, %s, %s)
                         ON CONFLICT (login) DO UPDATE SET morning = EXCLUDED.morning, morning_to = EXCLUDED.morning_to,
-                                                          morning_error = NULL""", (login, enabled, to))
-    settings.history_add(conn, actor, f"{login}: morning message {'on' if enabled else 'off'}, to {to.capitalize()}")
+                            morning_user = COALESCE(EXCLUDED.morning_user, people.morning_user), morning_error = NULL""",
+               (login, enabled, to, user_id))
+    if (enabled, to) != before or teams_url or remove_teams:
+        settings.history_add(conn, actor, f"{login}: morning message {'on' if enabled else 'off'}, to {to.capitalize()}")
     where = "in Teams, in your chat with Workflows" if to == "teams" else "in Slack"
     return done(f"You'll get a morning message {where} on working days, when something's waiting on you."
                 if enabled else "No more morning messages.", enabled=enabled, to=to)

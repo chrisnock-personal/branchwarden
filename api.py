@@ -159,6 +159,16 @@ def body() -> dict:
     return got
 
 
+def flag(b: dict, key: str, default: Optional[bool] = False) -> Optional[bool]:
+    """A JSON true or false. Anything else is refused rather than guessed: in Python, "false" is true."""
+    v = b.get(key)
+    if v is None:
+        return default
+    if isinstance(v, bool):
+        return v
+    raise _Bad(400, f"{key} must be true or false.")
+
+
 def flat(d: dict, keep_lists=("days",)) -> dict:
     """JSON for actions.py: lists (repos, teams, role lists) become comma-separated, as typed in the dashboard."""
     return {k: (",".join(str(x) for x in v) if isinstance(v, list) and k not in keep_lists else v)
@@ -376,8 +386,8 @@ def pulls_reviewers(pr_id: int):
     b = body()
     with db.get_conn() as conn:
         r = actions.reviewers(conn, settings.load(conn), pr_id, add=_who(b.get("add", [])),
-                              remove=_who(b.get("remove", [])), actor=actor(), tell=bool(b.get("notify")),
-                              dry_run=bool(b.get("dry_run")))
+                              remove=_who(b.get("remove", [])), actor=actor(), tell=flag(b, "notify"),
+                              dry_run=flag(b, "dry_run"))
     return result(r)
 
 
@@ -538,11 +548,10 @@ def my_morning():
     if g.api["service"] or not login:
         return error(409, "no_github_login", "This needs a person's token, with their GitHub login set.")
     b = body()
-    enabled = b.get("enabled")
     with db.get_conn() as conn:
-        return result(actions.set_morning(conn, login, None if enabled is None else bool(enabled), actor(),
+        return result(actions.set_morning(conn, login, flag(b, "enabled", None), actor(),
                                           to=b.get("to") or None, teams_url=b.get("teams_url") or None,
-                                          remove_teams=bool(b.get("remove_teams"))))
+                                          remove_teams=flag(b, "remove_teams"), user_id=g.api.get("user_id")))
 
 
 @endpoint("POST", "/my-work/morning/test", "self", "Send the token owner's morning message now", "me")
@@ -878,7 +887,7 @@ def admin_tls_put():
     with db.get_conn() as conn:
         return result(actions.tls_install(conn, str(b.get("cert", "")).encode(), str(b.get("key", "")).encode(),
                                           str(b.get("chain", "")).encode(), actor(),
-                                          self_signed=bool(b.get("self_signed")), restore=bool(b.get("restore_previous"))))
+                                          self_signed=flag(b, "self_signed"), restore=flag(b, "restore_previous")))
 
 
 @endpoint("GET", "/admin/deliveries", "admin", "Messages to Teams and Slack, newest first", "admin", paged=True,

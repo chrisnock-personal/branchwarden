@@ -543,7 +543,7 @@ def my_morning():
         # Save what's on the form either way, so "Send me one now" tries a URL just pasted.
         r = actions.set_morning(conn, login, {"on": True, "off": False}.get(action), g.user["name"],
                                 to=request.form.get("to") or None, teams_url=request.form.get("teams_url"),
-                                remove_teams=bool(request.form.get("remove_teams")))
+                                remove_teams=bool(request.form.get("remove_teams")), user_id=g.user["id"])
         if action == "test" and r.ok:
             r = actions.morning_now(conn, settings.load(conn), login)
     flash(r.message, r.tone)

@@ -249,8 +249,10 @@ class TokenGate:
                                  {"retry-after": "60"})
         problem = await self._check(token)
         if problem:
-            self._failed(who)
-            return await _answer(send, 401 if problem[0] == 3 else 502, problem[1])
+            if problem[0] == 3:                    # a bad token; Branchwarden being down or busy isn't one
+                self._failed(who)
+                return await _answer(send, 401, problem[1])
+            return await _answer(send, 502, problem[1])
         reset = _token.set(token)
         try:
             await self.app(scope, receive, send)

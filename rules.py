@@ -725,9 +725,11 @@ def run_morning(conn, values: dict, now: Optional[datetime] = None, force_login:
     if local.weekday() not in hours.days or local.time() < at:
         return 0
     sent = 0
-    for person in db.rows(conn, """SELECT * FROM people WHERE morning
-                                    AND (morning_to = 'teams' OR slack_id <> '')
-                                    AND (morning_last IS NULL OR morning_last < %s)""", (local.date(),)):
+    # Only while the account that set it up still exists and still has this login.
+    for person in db.rows(conn, """SELECT p.* FROM people p JOIN users u ON u.id = p.morning_user
+                                    WHERE p.morning AND LOWER(u.github_login) = p.login
+                                    AND (p.morning_to = 'teams' OR p.slack_id <> '')
+                                    AND (p.morning_last IS NULL OR p.morning_last < %s)""", (local.date(),)):
         result = send_morning(conn, values, person, now)
         if result.startswith("retry"):
             continue                                   # try again on the next tick

@@ -403,6 +403,13 @@ CREATE TABLE IF NOT EXISTS users (
 ALTER TABLE users ADD COLUMN IF NOT EXISTS github_id BIGINT UNIQUE;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS github_login TEXT;
 
+-- The account that set up a person's morning message: it's sent only while that account exists and
+-- still has the login, and only that account (or one signing in with GitHub as that login) changes it.
+ALTER TABLE people ADD COLUMN IF NOT EXISTS morning_user INTEGER REFERENCES users (id) ON DELETE SET NULL;
+-- Opt-ins from before 0.8.1: the account with that login (the oldest, if more than one).
+UPDATE people p SET morning_user = (SELECT MIN(u.id) FROM users u WHERE LOWER(u.github_login) = p.login)
+ WHERE p.morning AND p.morning_user IS NULL;
+
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
 ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('admin', 'member', 'viewer'));
 
