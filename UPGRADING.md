@@ -46,15 +46,15 @@ With a git clone:
 
 ```bash
 git fetch --tags
-git checkout v0.7.0
+git checkout v0.8.0
 ```
 
 Without git, download the release and copy `docker-compose.yml` and the
 `deploy/` folder over yours:
 
 ```bash
-curl -L -o bw.tar.gz https://github.com/chrisnock-personal/branchwarden/archive/refs/tags/v0.7.0.tar.gz
-tar -xzf bw.tar.gz && cp branchwarden-0.7.0/docker-compose.yml . && cp -r branchwarden-0.7.0/deploy .
+curl -L -o bw.tar.gz https://github.com/chrisnock-personal/branchwarden/archive/refs/tags/v0.8.0.tar.gz
+tar -xzf bw.tar.gz && cp branchwarden-0.8.0/docker-compose.yml . && cp -r branchwarden-0.8.0/deploy .
 ```
 
 The running containers aren't touched yet.
@@ -87,7 +87,7 @@ podman tag localhost/branchwarden:latest localhost/branchwarden:before-upgrade
 ## 5. Switch over
 
 ```bash
-echo "BRANCHWARDEN_VERSION=0.7.0" >> .env
+echo "BRANCHWARDEN_VERSION=0.8.0" >> .env
 podman-compose down                            # not "down -v": that would delete the data
 podman-compose pull
 podman-compose up -d
@@ -98,7 +98,7 @@ podman-compose up -d
 ## 6. Check it
 
 ```bash
-curl -sk https://localhost:8443/healthz        # "version":"0.7.0"
+curl -sk https://localhost:8443/healthz        # "version":"0.8.0"
 podman ps                                      # all three "(healthy)" after a minute or so
 podman-compose logs worker | grep -iE "imported|scan \\("
 ```

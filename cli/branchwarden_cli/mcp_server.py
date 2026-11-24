@@ -210,14 +210,22 @@ def run() -> None:
 
 CHECK_SECONDS = 60          # a token that worked is trusted this long before it's checked again
 FAILS_PER_MINUTE = 30       # bad tokens from one address, before it's told to wait
+# Bad tokens from everyone together. Every check reaches Branchwarden from this one address, and
+# Branchwarden refuses an address that sends 30 bad tokens a minute, good tokens included: staying
+# under that keeps tokens already checked working for everyone while someone is guessing.
+FAILS_IN_ALL_PER_MINUTE = 20
+
+
+ALL = "*"                   # TokenGate's count of bad tokens from every address
 
 
 class TokenGate:
     """ASGI middleware: every HTTP request needs a Branchwarden API token, checked with Branchwarden's /me.
 
     Good answers are remembered for CHECK_SECONDS (by the token's hash), so a session doesn't cost a
-    check per call; a revoked token stops working within that time. Bad tokens are counted per address,
-    so guessing is throttled here rather than at Branchwarden, where every client shares this address."""
+    check per call; a revoked token stops working within that time. Bad tokens are counted per address
+    and in all (FAILS_IN_ALL_PER_MINUTE), so guessing is throttled here, before it reaches Branchwarden,
+    where every client shares this server's address."""
 
     def __init__(self, app, url: str, fingerprint: Optional[str]):
         self.app, self.url, self.fingerprint = app, url, fingerprint
@@ -236,6 +244,9 @@ class TokenGate:
         token = auth[7:].strip() if auth[:7].lower() == "bearer " else ""
         if not token:
             return await _answer(send, 401, "Send a Branchwarden API token: Authorization: Bearer bwt_…")
+        if not self._known(token) and self._throttled(ALL):
+            return await _answer(send, 429, "Too many bad tokens just now: try again in a minute.",
+                                 {"retry-after": "60"})
         problem = await self._check(token)
         if problem:
             self._failed(who)
@@ -246,13 +257,16 @@ class TokenGate:
         finally:
             _token.reset(reset)
 
+    def _known(self, token: str) -> bool:
+        with self.lock:
+            return self.good.get(hashlib.sha256(token.encode()).hexdigest(), 0) > time.monotonic()
+
     async def _check(self, token: str) -> Optional[tuple[int, str]]:
         import anyio
         key = hashlib.sha256(token.encode()).hexdigest()
         now = time.monotonic()
-        with self.lock:
-            if self.good.get(key, 0) > now:
-                return None
+        if self._known(token):
+            return None
 
         def ask():
             try:
@@ -272,11 +286,14 @@ class TokenGate:
             q = self.fails.get(who)
             while q and q[0] < time.monotonic() - 60:
                 q.popleft()
-            return bool(q) and len(q) >= FAILS_PER_MINUTE
+            if q is not None and not q:
+                self.fails.pop(who, None)
+            return bool(q) and len(q) >= (FAILS_IN_ALL_PER_MINUTE if who == ALL else FAILS_PER_MINUTE)
 
     def _failed(self, who: str) -> None:
         with self.lock:
             self.fails.setdefault(who, deque()).append(time.monotonic())
+            self.fails.setdefault(ALL, deque()).append(time.monotonic())
 
 
 async def _answer(send, status: int, message: str, extra: Optional[dict] = None) -> None:

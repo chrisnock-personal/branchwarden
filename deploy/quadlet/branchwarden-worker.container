@@ -9,7 +9,7 @@ Image=ghcr.io/chrisnock-personal/branchwarden:latest
 Network=branchwarden.network
 EnvironmentFile=%h/.config/branchwarden/branchwarden.env
 Environment=POSTGRES_HOST=branchwarden-db
-Volume=branchwarden-keys.volume:/keys:Z
+Volume=branchwarden-keys.volume:/keys:z
 HealthCmd=python healthcheck.py worker
 HealthInterval=30s
 HealthTimeout=10s

@@ -1,0 +1,4 @@
+# The MCP server over HTTP (the mcp service: `podman-compose --profile mcp up -d`), installed in
+# the image with the CLI from ./cli. Its own dependencies come from these.
+mcp==2.3.0
+keyring==25.7.0

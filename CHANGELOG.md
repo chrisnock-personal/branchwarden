@@ -4,6 +4,32 @@ All notable changes to Branchwarden. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.0] - 2026-11-24
+
+### Added
+
+- **The MCP service:** the image now includes the CLI, so MCP over HTTP can
+  run next to the app with `podman-compose --profile mcp up -d` (or the new
+  `branchwarden-mcp` quadlet), on port 8765.
+  - It pins and serves the dashboard's own certificate, and restarts itself
+    when that certificate is replaced.
+  - Its health check is `healthcheck.py mcp`.
+  - It's off unless asked for.
+
+### Changed
+
+- **MCP over HTTP caps bad tokens in all**, not only per address, below the
+  API's own limit. Before, guesses spread over many addresses could get the
+  MCP server's single address throttled by Branchwarden, good tokens
+  included. Tokens already checked keep working throughout.
+
+### Fixed
+
+- **Shared volumes on SELinux hosts:** the `keys` and `certs` volumes are
+  shared by two containers, so compose and the quadlets now mount them with
+  `:z`. `:Z` made each private to whichever container started last, so the
+  other lost access on hosts with SELinux enforcing.
+
 ## [0.7.0] - 2026-11-23
 
 ### Added

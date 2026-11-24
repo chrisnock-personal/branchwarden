@@ -31,7 +31,8 @@ services:
     environment:
       POSTGRES_HOST: db
     volumes:
-      - keys:/keys:Z
+      # Lower-case z: shared with the dashboard (Z would make it private to one container under SELinux).
+      - keys:/keys:z
     # Its heartbeat file is touched every few seconds, and after each repo during a scan.
     healthcheck:
       test: ["CMD", "python", "healthcheck.py", "worker"]
@@ -53,13 +54,37 @@ services:
     environment:
       POSTGRES_HOST: db
     volumes:
-      - keys:/keys:Z
-      - certs:/certs:Z
+      - keys:/keys:z
+      - certs:/certs:z
     ports:
       - "${DASHBOARD_EXPOSE:-8443}:8443"
     # /healthz over its own HTTPS port; it also checks the database.
     healthcheck:
       test: ["CMD", "python", "healthcheck.py", "dashboard"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Optional: the MCP server over HTTPS, for AI agents on other machines. Started only with
+  # `podman-compose --profile mcp up -d`. Each agent sends its own API token; this keeps none.
+  mcp:
+    image: ghcr.io/chrisnock-personal/branchwarden:${BRANCHWARDEN_VERSION:-latest}
+    profiles: ["mcp"]
+    restart: unless-stopped
+    entrypoint: ["python", "-u", "mcp_service.py"]
+    depends_on:
+      dashboard:
+        condition: service_healthy
+    environment:
+      MCP_UPSTREAM: https://dashboard:8443
+      MCP_ALLOWED_HOSTS: ${MCP_ALLOWED_HOSTS:-}
+    volumes:
+      - certs:/certs:ro,z          # the dashboard's certificate: pinned, and served
+    ports:
+      - "${MCP_EXPOSE:-8765}:8765"
+    healthcheck:
+      test: ["CMD", "python", "healthcheck.py", "mcp"]
       interval: 30s
       timeout: 10s
       retries: 3

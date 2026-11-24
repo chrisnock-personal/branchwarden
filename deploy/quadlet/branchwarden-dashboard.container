@@ -12,8 +12,8 @@ Network=branchwarden.network
 PublishPort=8443:8443
 EnvironmentFile=%h/.config/branchwarden/branchwarden.env
 Environment=POSTGRES_HOST=branchwarden-db
-Volume=branchwarden-keys.volume:/keys:Z
-Volume=branchwarden-certs.volume:/certs:Z
+Volume=branchwarden-keys.volume:/keys:z
+Volume=branchwarden-certs.volume:/certs:z
 HealthCmd=python healthcheck.py dashboard
 HealthInterval=30s
 HealthTimeout=10s

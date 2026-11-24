@@ -125,7 +125,9 @@ usually run on the Branchwarden server itself, or next to it.
 - **Host names:** `--allowed-host` makes it answer only requests addressed to
   the names you give.
 
-It needs to know where Branchwarden is, but not a token: either sign in once
+On a Branchwarden server, the image already has it: `podman-compose --profile
+mcp up -d` runs it next to the app with the dashboard's certificate (see the
+main README's *The MCP service*). Elsewhere, it needs to know where Branchwarden is, but not a token: either sign in once
 with `branchwarden login`, or set `BRANCHWARDEN_URL` (and
 `BRANCHWARDEN_FINGERPRINT` for a self-signed certificate).
 

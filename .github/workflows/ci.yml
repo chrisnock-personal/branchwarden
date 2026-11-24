@@ -37,7 +37,7 @@ jobs:
       - name: Tests
         run: python -m pytest -q
       - name: Known vulnerabilities in dependencies
-        run: pip-audit -r requirements.txt
+        run: pip-audit -r requirements.txt -r requirements-mcp.txt
       - name: Secrets in the history
         uses: gitleaks/gitleaks-action@v3
         env:
@@ -58,6 +58,23 @@ jobs:
           docker compose up -d
           for _ in $(seq 1 60); do curl -skf https://localhost:8443/healthz && break; sleep 2; done
           docker compose exec -T worker python demo.py
+      - name: The MCP service, with a real token
+        run: |
+          docker compose --profile mcp up -d mcp
+          for _ in $(seq 1 60); do [ "$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q mcp)")" = healthy ] && break; sleep 2; done
+          token=$(docker compose exec -T worker python -c "import apitokens, db
+          with db.get_conn() as c: print(apitokens.create(c, 'ci', 'read', 'ci', role='viewer')[1])")
+          call() { curl -sk -X POST https://localhost:8765/mcp -H "Content-Type: application/json" \
+                     -H "Accept: application/json, text/event-stream" "$@" \
+                     -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"overview","arguments":{}}}'; }
+          [ "$(call -o /dev/null -w '%{http_code}')" = 401 ] || { echo "no token should get 401"; exit 1; }
+          call -H "Authorization: Bearer $token" | grep -q open_prs || { echo "the overview tool didn't answer"; exit 1; }
+          # It serves the dashboard's own certificate.
+          a=$(echo | openssl s_client -connect localhost:8443 2>/dev/null | openssl x509 -noout -fingerprint -sha256)
+          b=$(echo | openssl s_client -connect localhost:8765 2>/dev/null | openssl x509 -noout -fingerprint -sha256)
+          [ -n "$a" ] && [ "$a" = "$b" ] || { echo "the MCP service should serve the dashboard's certificate"; exit 1; }
+          echo "MCP service: healthy, 401 without a token, answers with one, same certificate"
+          docker compose --profile mcp stop mcp
       - name: Back up, destroy, restore
         env:
           ENGINE: docker

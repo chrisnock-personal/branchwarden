@@ -5,8 +5,11 @@ LABEL org.opencontainers.image.title="Branchwarden" \
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt requirements-mcp.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-mcp.txt
+# The CLI, for the mcp service (branchwarden mcp --http); its dependencies are pinned above.
+COPY cli/ /tmp/cli/
+RUN pip install --no-cache-dir --no-deps /tmp/cli && rm -rf /tmp/cli
 
 COPY *.py entrypoint.sh ./
 COPY templates/ templates/

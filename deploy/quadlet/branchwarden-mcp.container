@@ -1,0 +1,28 @@
+[Unit]
+Description=Branchwarden MCP server over HTTPS, for AI agents (optional)
+Requires=branchwarden-dashboard.service
+After=branchwarden-dashboard.service
+
+[Container]
+ContainerName=branchwarden-mcp
+Image=ghcr.io/chrisnock-personal/branchwarden:latest
+Entrypoint=python
+Exec=-u mcp_service.py
+Network=branchwarden.network
+PublishPort=8765:8765
+# The dashboard as this container reaches it on the network; its certificate is pinned from the volume.
+Environment=MCP_UPSTREAM=https://branchwarden-dashboard:8443
+# Environment=MCP_ALLOWED_HOSTS=branchwarden.example.com:8765
+Volume=branchwarden-certs.volume:/certs:ro,z
+HealthCmd=python healthcheck.py mcp
+HealthInterval=30s
+HealthTimeout=10s
+HealthRetries=3
+HealthStartPeriod=30s
+# AutoUpdate=registry
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target

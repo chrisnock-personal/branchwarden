@@ -205,3 +205,17 @@ def test_over_http_each_client_with_its_own_token(live, monkeypatch):
             assert err.value.code == 401
     finally:
         server.should_exit = True
+
+
+def test_http_bad_tokens_in_all_stay_under_branchwarden_s_limit():
+    # Branchwarden refuses an address after 30 bad tokens a minute, good tokens included, and every
+    # check comes from this server: guesses spread over many addresses must stop short of that.
+    import api
+    gate = mcp_server.TokenGate(None, "https://bw.example", None)
+    assert mcp_server.FAILS_IN_ALL_PER_MINUTE < api.FAILED_LIMIT
+    for i in range(mcp_server.FAILS_IN_ALL_PER_MINUTE):
+        gate._failed(f"203.0.113.{i}")
+    assert gate._throttled(mcp_server.ALL) and not gate._throttled("203.0.113.1")
+    known = "bwt_known"
+    gate.good[__import__("hashlib").sha256(known.encode()).hexdigest()] = __import__("time").monotonic() + 60
+    assert gate._known(known) and not gate._known("bwt_new")        # a known token still gets through

@@ -369,8 +369,39 @@ branchwarden me
   dry run unless asked, and a read-only token keeps an agent to looking.
   `branchwarden mcp --http` serves them over HTTP for agents on other
   machines. Each client sends its own API token, and the server keeps none (see
-  [cli/README.md](cli/README.md#over-http-for-agents-on-other-machines)).
+  [cli/README.md](cli/README.md#over-http-for-agents-on-other-machines)). To run
+  it next to the app, see [The MCP service](#the-mcp-service-for-ai-agents-on-other-machines).
 - **Exit codes** say what happened, so scripts can act on them.
+
+### The MCP service, for AI agents on other machines
+
+The image includes the CLI, so the HTTP MCP server can run as one more
+container next to the app. It's optional, and it starts only when asked:
+
+```bash
+podman-compose --profile mcp up -d
+```
+
+- **Address:** it listens on 8765 (`MCP_EXPOSE` in `.env`) at
+  `https://<your server>:8765/mcp`.
+- **Certificate:** it uses the dashboard's own certificate, so agents trust
+  the same fingerprint as the CLI. When the certificate is replaced under
+  *Settings › TLS*, it restarts itself with the new one.
+- **Tokens:** it keeps none. Each agent sends its own API token, checked with
+  Branchwarden, and gets what that token allows.
+- **Host names:** set `MCP_ALLOWED_HOSTS` (comma-separated `name:port`) to
+  answer only requests addressed to those names.
+
+Connecting Claude Code, with a token from *API tokens*:
+
+```bash
+claude mcp add --transport http branchwarden https://branchwarden.example.com:8765/mcp \
+  --header "Authorization: Bearer bwt_…"
+```
+
+With Branchwarden's own self-signed certificate, the agent's machine has to
+trust it. For Claude Code that's `NODE_EXTRA_CA_CERTS=/path/to/cert.pem` (the
+certificate from *Settings › TLS*).
 
 ## Roles
 
@@ -507,7 +538,8 @@ everything, restores it and checks it all came back, on every push
 - **Containers:** compose checks the dashboard with `/healthz` (which also
   checks the database) and the worker with its heartbeat. The worker touches a
   file every few seconds, and after each repo while a scan runs, so a long scan
-  isn't mistaken for a stuck one. Both are `python healthcheck.py dashboard|worker`.
+  isn't mistaken for a stuck one. The MCP service is up when it answers 401
+  (it wants a token). They're `python healthcheck.py dashboard|worker|mcp`.
 - **On the dashboard:** when no full scan has finished for more than twice the
   scan interval (and none is running), every page shows a banner saying that
   pull requests, reminders and messages are on hold until the worker runs again.
@@ -521,7 +553,9 @@ with its data and key.
 
 ```bash
 mkdir -p ~/.config/containers/systemd/branchwarden ~/.config/branchwarden
-cp deploy/quadlet/* ~/.config/containers/systemd/branchwarden/
+# Everything but the optional MCP service: copy branchwarden-mcp.container too if you want it.
+cp deploy/quadlet/branchwarden.network deploy/quadlet/*.volume deploy/quadlet/branchwarden-{db,worker,dashboard}.container \
+   ~/.config/containers/systemd/branchwarden/
 install -m 600 .env ~/.config/branchwarden/branchwarden.env   # the same settings as compose's .env
 podman-compose down                                           # if moving from compose (volumes are kept)
 systemctl --user daemon-reload
@@ -532,7 +566,13 @@ loginctl enable-linger "$USER"                                # keep them runnin
 They start at boot (`WantedBy=default.target`). The dashboard is published on
 8443; change `PublishPort` in `branchwarden-dashboard.container` for another
 port. Uncomment `AutoUpdate=registry` to let `podman auto-update` install new
-releases of the image tag.
+releases of the image tag. `branchwarden-mcp.container` is the optional MCP
+service, on 8765. Copy it as well and run `systemctl --user start
+branchwarden-mcp` to use it.
+
+Volumes shared by two containers are mounted with `:z`, not `:Z`. On a host
+with SELinux enforcing, `:Z` makes a volume private to one container, and the
+other loses access to it.
 
 ## Configuration (.env)
 
@@ -635,6 +675,7 @@ The files:
 | `prom.py` | The Prometheus endpoint |
 | `demo.py` | Loading and removing the demo data |
 | `healthcheck.py` | Container health checks, and the worker's heartbeat |
+| `mcp_service.py` | The optional mcp service: `branchwarden mcp --http` next to the app |
 | `deploy/quadlet/` | Podman quadlet files, to run as systemd services |
 | `deploy/backup.sh`, `deploy/restore.sh` | Encrypted backups and restores |
 | `dashboard.py`, `admin.py`, `templates/` | The web UI |
