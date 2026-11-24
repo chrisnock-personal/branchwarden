@@ -57,11 +57,14 @@ def dashboard_ok() -> bool:
 
 def mcp_ok() -> bool:
     import urllib.error
+
+    import tls
     port = os.getenv("MCP_PORT", "8765")
-    req = urllib.request.Request(f"https://127.0.0.1:{port}/mcp", data=b"{}", method="POST",
+    scheme = "https" if tls.enabled() else "http"
+    req = urllib.request.Request(f"{scheme}://127.0.0.1:{port}/mcp", data=b"{}", method="POST",
                                  headers={"Content-Type": "application/json"})
     try:
-        urllib.request.urlopen(req, timeout=5, context=ssl._create_unverified_context())
+        urllib.request.urlopen(req, timeout=5, context=ssl._create_unverified_context() if scheme == "https" else None)
     except urllib.error.HTTPError as exc:
         return exc.code == 401
     except OSError:

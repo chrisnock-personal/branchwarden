@@ -76,8 +76,10 @@ services:
     depends_on:
       dashboard:
         condition: service_healthy
+    # Not the whole .env: only what it needs to find the dashboard (no database password, no secret key).
     environment:
-      MCP_UPSTREAM: https://dashboard:8443
+      BRANCHWARDEN_TLS: ${BRANCHWARDEN_TLS:-on}
+      DASHBOARD_PORT: ${DASHBOARD_PORT:-}
       MCP_ALLOWED_HOSTS: ${MCP_ALLOWED_HOSTS:-}
     volumes:
       - certs:/certs:ro,z          # the dashboard's certificate: pinned, and served

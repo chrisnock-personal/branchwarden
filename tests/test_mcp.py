@@ -238,3 +238,32 @@ def test_http_an_outage_isnt_counted_as_bad_tokens():
     asyncio.run(go())
     assert {m["status"] for m in out if m["type"] == "http.response.start"} == {502}
     assert not gate._throttled("203.0.113.9") and not gate._throttled(mcp_server.ALL)
+
+
+def test_http_a_burst_of_bad_tokens_cant_pass_the_cap_in_all():
+    # Unknown tokens arriving together, each check slow: no more of them reach Branchwarden than the cap.
+    checked = []
+
+    async def slow_no(token):
+        import anyio
+        checked.append(token)
+        await anyio.sleep(0.2)
+        return (3, "That token isn't valid.")
+    gate = mcp_server.TokenGate(None, "https://bw.example", None)
+    gate._check = slow_no
+    statuses = []
+
+    async def send(msg):
+        if msg["type"] == "http.response.start":
+            statuses.append(msg["status"])
+
+    async def go():
+        import anyio
+        async with anyio.create_task_group() as tg:
+            for i in range(60):
+                tg.start_soon(gate, {"type": "http", "headers": [(b"authorization", f"Bearer bwt_guess{i}".encode())],
+                                     "client": (f"203.0.113.{i}", 1)}, None, send)
+    asyncio.run(go())
+    assert len(checked) == mcp_server.FAILS_IN_ALL_PER_MINUTE
+    assert statuses.count(401) == mcp_server.FAILS_IN_ALL_PER_MINUTE and statuses.count(429) == 60 - len(checked)
+    assert not gate.checking                                          # nothing left counted as under way

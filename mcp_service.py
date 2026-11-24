@@ -14,7 +14,13 @@ fingerprint) they already know. Clients send their own API tokens; this keeps no
 When the certificate is replaced under Settings › TLS, this exits and its
 restart policy starts it again with the new one.
 
-    MCP_UPSTREAM        the dashboard, as this container reaches it (https://dashboard:8443)
+With BRANCHWARDEN_TLS=off (a reverse proxy doing HTTPS), there's no certificate:
+it reaches the dashboard over plain HTTP and listens on plain HTTP, for the
+same proxy to put HTTPS in front of it. Its requests say they came in over
+HTTPS (X-Forwarded-Proto), as its own clients' did, through the proxy.
+
+    MCP_DASHBOARD_HOST  the dashboard's name on the stack's network (dashboard)
+    MCP_UPSTREAM        or its whole address, overriding the above (https://dashboard:8443)
     MCP_PORT            the port to listen on (8765)
     MCP_ALLOWED_HOSTS   optional: only answer requests addressed to these names (comma-separated)
 """
@@ -61,18 +67,38 @@ def exit_when_replaced(pinned: str, every: float = 30) -> None:
     threading.Thread(target=watch, daemon=True).start()
 
 
+def upstream_url() -> str:
+    """The dashboard as this container reaches it: the same port and scheme its own settings give it."""
+    if os.getenv("MCP_UPSTREAM"):
+        return os.environ["MCP_UPSTREAM"]
+    host = os.getenv("MCP_DASHBOARD_HOST") or "dashboard"
+    if tls.enabled():
+        return f"https://{host}:{os.getenv('DASHBOARD_PORT') or '8443'}"
+    return f"http://{host}:{os.getenv('DASHBOARD_PORT') or '8080'}"
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s %(message)s")
     from branchwarden_cli import mcp_server
+    os.environ["BRANCHWARDEN_URL"] = upstream_url()
+    allowed = [h.strip() for h in os.getenv("MCP_ALLOWED_HOSTS", "").split(",") if h.strip()]
+    port = int(os.getenv("MCP_PORT", "8765"))
+    if not tls.enabled():
+        log.info("BRANCHWARDEN_TLS is off: plain HTTP to the dashboard and on port %s, for the proxy to front.", port)
+        os.environ["BRANCHWARDEN_CLI_ALLOW_HTTP"] = "1"
+        os.environ["BRANCHWARDEN_CLI_FORWARDED_PROTO"] = "https"
+        try:
+            mcp_server.run_http(host="0.0.0.0", port=port, allow_http=True, allowed_hosts=allowed or None)
+        except RuntimeError as exc:
+            sys.exit(str(exc))
+        return
     wait_for_certificate()
     pinned = fingerprint()
-    os.environ["BRANCHWARDEN_URL"] = os.getenv("MCP_UPSTREAM", "https://dashboard:8443")
     os.environ["BRANCHWARDEN_FINGERPRINT"] = pinned
     exit_when_replaced(pinned)
-    allowed = [h.strip() for h in os.getenv("MCP_ALLOWED_HOSTS", "").split(",") if h.strip()]
     try:
-        mcp_server.run_http(host="0.0.0.0", port=int(os.getenv("MCP_PORT", "8765")), certfile=tls.CERT,
-                            keyfile=tls.KEY, allowed_hosts=allowed or None)
+        mcp_server.run_http(host="0.0.0.0", port=port, certfile=tls.CERT, keyfile=tls.KEY,
+                            allowed_hosts=allowed or None)
     except RuntimeError as exc:
         sys.exit(str(exc))
 

@@ -4,6 +4,32 @@ All notable changes to Branchwarden. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.2] - 2026-11-24
+
+The two issues left open by the bug hunt.
+
+### Fixed
+
+- **MCP over HTTP: a burst of bad tokens can't pass the cap in total**
+  (#30). Checks still under way now count toward it, so many unknown tokens
+  sent at once can't all reach Branchwarden before the first fails. Before,
+  a burst could get the MCP service's address throttled by Branchwarden for
+  a minute.
+- **The MCP service works behind a reverse proxy** (#31). With
+  `BRANCHWARDEN_TLS=off`, it reaches the dashboard over plain HTTP and
+  listens on plain HTTP for the proxy to front. Before, it waited for a
+  certificate that's never made, and restarted in a loop.
+- **`.env.example`:** with TLS off, the dashboard listens on 8080 inside its
+  container, not 8443 where compose publishes it. `DASHBOARD_PORT=8443` is
+  now shown next to `BRANCHWARDEN_TLS=off`.
+
+### Changed
+
+- **The compose `mcp` service** gets only `BRANCHWARDEN_TLS` and
+  `DASHBOARD_PORT` from `.env`, to find the dashboard. The quadlet names the
+  dashboard with `MCP_DASHBOARD_HOST` instead of a whole `MCP_UPSTREAM`
+  (still honoured if set).
+
 ## [0.8.1] - 2026-11-24
 
 Fixes from a bug hunt.

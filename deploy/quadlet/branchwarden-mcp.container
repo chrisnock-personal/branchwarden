@@ -11,7 +11,9 @@ Exec=-u mcp_service.py
 Network=branchwarden.network
 PublishPort=8765:8765
 # The dashboard as this container reaches it on the network; its certificate is pinned from the volume.
-Environment=MCP_UPSTREAM=https://branchwarden-dashboard:8443
+Environment=MCP_DASHBOARD_HOST=branchwarden-dashboard
+# Behind a reverse proxy doing HTTPS, as the dashboard (plain HTTP both ways, for the proxy to front):
+# Environment=BRANCHWARDEN_TLS=off
 # Environment=MCP_ALLOWED_HOSTS=branchwarden.example.com:8765
 Volume=branchwarden-certs.volume:/certs:ro,z
 HealthCmd=python healthcheck.py mcp

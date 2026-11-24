@@ -391,6 +391,10 @@ podman-compose --profile mcp up -d
   Branchwarden, and gets what that token allows.
 - **Host names:** set `MCP_ALLOWED_HOSTS` (comma-separated `name:port`) to
   answer only requests addressed to those names.
+- **Behind a reverse proxy** (`BRANCHWARDEN_TLS=off`): it follows the
+  dashboard and speaks plain HTTP on 8765, for the proxy to put HTTPS in front
+  of it. Publish it to the proxy only, e.g. `MCP_EXPOSE=127.0.0.1:8765`. With
+  quadlets, uncomment `BRANCHWARDEN_TLS=off` in `branchwarden-mcp.container`.
 
 Connecting Claude Code, with a token from *API tokens*:
 
@@ -409,9 +413,9 @@ certificate from *Settings › TLS*).
 |---|---|
 | Admin | Everything: GitHub connections, channels and rules, people, the TLS certificate, users |
 | Member | What viewers can, plus request reviewers, snooze reminders, ignore branches and start a scan |
+| Viewer | Read the overview, pull requests, branches, repositories, workflows, metrics and MVP, and their own My work |
 
 Everyone can make their own API tokens, which act with their role (or less, if read-only).
-| Viewer | Read the overview, pull requests, branches, repositories, workflows, metrics and MVP, and their own My work |
 
 People are added under *Settings › Users and access*. Each gets a one-time setup
 link that lasts 24 hours. Branchwarden doesn't send email, so you pass the link on.

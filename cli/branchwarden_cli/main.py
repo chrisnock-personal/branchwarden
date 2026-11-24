@@ -137,6 +137,8 @@ class Client:
         headers = {"Accept": "application/json", "User-Agent": f"branchwarden-cli/{__version__}"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
+        if os.environ.get("BRANCHWARDEN_CLI_FORWARDED_PROTO"):   # the MCP service behind the same HTTPS proxy
+            headers["X-Forwarded-Proto"] = os.environ["BRANCHWARDEN_CLI_FORWARDED_PROTO"]
         data = None
         if body is not None:
             data = json.dumps(body).encode()

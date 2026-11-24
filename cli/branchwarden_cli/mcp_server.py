@@ -231,6 +231,7 @@ class TokenGate:
         self.app, self.url, self.fingerprint = app, url, fingerprint
         self.good: dict[str, float] = {}
         self.fails: dict[str, deque] = {}
+        self.checking: dict[str, int] = {}       # checks under way, by address and in all: they may yet fail
         self.lock = threading.Lock()
 
     async def __call__(self, scope, receive, send):
@@ -244,15 +245,19 @@ class TokenGate:
         token = auth[7:].strip() if auth[:7].lower() == "bearer " else ""
         if not token:
             return await _answer(send, 401, "Send a Branchwarden API token: Authorization: Bearer bwt_…")
-        if not self._known(token) and self._throttled(ALL):
-            return await _answer(send, 429, "Too many bad tokens just now: try again in a minute.",
-                                 {"retry-after": "60"})
-        problem = await self._check(token)
-        if problem:
-            if problem[0] == 3:                    # a bad token; Branchwarden being down or busy isn't one
-                self._failed(who)
-                return await _answer(send, 401, problem[1])
-            return await _answer(send, 502, problem[1])
+        if not self._known(token):
+            if not self._start(who):
+                return await _answer(send, 429, "Too many bad tokens just now: try again in a minute.",
+                                     {"retry-after": "60"})
+            try:
+                problem = await self._check(token)
+            finally:
+                self._finish(who)
+            if problem:
+                if problem[0] == 3:                # a bad token; Branchwarden being down or busy isn't one
+                    self._failed(who)
+                    return await _answer(send, 401, problem[1])
+                return await _answer(send, 502, problem[1])
         reset = _token.set(token)
         try:
             await self.app(scope, receive, send)
@@ -285,12 +290,33 @@ class TokenGate:
 
     def _throttled(self, who: str) -> bool:
         with self.lock:
-            q = self.fails.get(who)
-            while q and q[0] < time.monotonic() - 60:
-                q.popleft()
-            if q is not None and not q:
-                self.fails.pop(who, None)
-            return bool(q) and len(q) >= (FAILS_IN_ALL_PER_MINUTE if who == ALL else FAILS_PER_MINUTE)
+            return self._count(who, under_way=False) >= (FAILS_IN_ALL_PER_MINUTE if who == ALL else FAILS_PER_MINUTE)
+
+    def _count(self, who: str, under_way: bool = True) -> int:
+        """Bad tokens in the last minute, plus the checks under way that could still add to them (holding the lock)."""
+        q = self.fails.get(who)
+        while q and q[0] < time.monotonic() - 60:
+            q.popleft()
+        if q is not None and not q:
+            self.fails.pop(who, None)
+        return len(q or ()) + (self.checking.get(who, 0) if under_way else 0)
+
+    def _start(self, who: str) -> bool:
+        """Room for one more check of an unknown token? Counted as under way at once, so a burst of
+        tokens arriving together can't all pass before the first of them fails."""
+        with self.lock:
+            if self._count(who) >= FAILS_PER_MINUTE or self._count(ALL) >= FAILS_IN_ALL_PER_MINUTE:
+                return False
+            for k in (who, ALL):
+                self.checking[k] = self.checking.get(k, 0) + 1
+            return True
+
+    def _finish(self, who: str) -> None:
+        with self.lock:
+            for k in (who, ALL):
+                self.checking[k] -= 1
+                if not self.checking[k]:
+                    del self.checking[k]
 
     def _failed(self, who: str) -> None:
         with self.lock:
