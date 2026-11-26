@@ -345,8 +345,8 @@ def channel_url_problem(kind: str, url: str) -> Optional[str]:
     parts = urlsplit(url)
     if parts.scheme != "https" or not parts.netloc:
         return "The webhook URL must start with https://"
-    host = parts.hostname or ""
-    if kind == "slack" and not host.endswith("slack.com"):
+    host = (parts.hostname or "").lower()
+    if kind == "slack" and not (host == "slack.com" or host.endswith(".slack.com")):
         return "A Slack incoming webhook URL starts with https://hooks.slack.com/"
     if kind == "teams" and not (host.endswith(".logic.azure.com") or host.endswith(".powerplatform.com")
                                 or host.endswith(".office.com") or host.endswith(".microsoft.com")):
