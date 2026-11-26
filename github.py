@@ -16,7 +16,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 import jwt
@@ -41,6 +41,7 @@ class RateLimit:
     remaining: Optional[int] = None
     limit: Optional[int] = None
     reset_at: Optional[str] = None
+    cost: Optional[int] = None
 
 
 def graphql_url(api_url: str) -> str:
@@ -106,6 +107,7 @@ class Client:
         self.rate = RateLimit()
         self.token_expires: Optional[str] = None
         self.requests = 0                   # calls made, for the scan log
+        self.points = 0                     # API points spent (GraphQL's cost, one per REST call)
         self._local = threading.local()     # a requests.Session per thread: scans run repos in parallel
         self._count_lock = threading.Lock()
 
@@ -122,6 +124,7 @@ class Client:
         for attempt in range(3):
             with self._count_lock:
                 self.requests += 1
+                self.points += 1
             try:
                 resp = self.session.request(method, url, headers=self._headers(), **kwargs)
             except requests.RequestException as exc:
@@ -186,7 +189,12 @@ class Client:
                 raise GitHubError(msgs)
         rl = data.get("rateLimit")
         if rl:
-            self.rate = RateLimit(rl.get("remaining"), rl.get("limit"), rl.get("resetAt"))
+            # _send counted one point for the call; GraphQL's own cost (when
+            # present) is the exact figure GitHub charged for this query.
+            cost = rl.get("cost")
+            if isinstance(cost, int):
+                self.points += max(0, cost - 1)
+            self.rate = RateLimit(rl.get("remaining"), rl.get("limit"), rl.get("resetAt"), cost)
         return data
 
     # ── The calls Branchwarden makes ──

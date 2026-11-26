@@ -50,6 +50,7 @@ DEFAULTS = {
     "INCLUDE_ARCHIVED": ("Include archived repositories", "false"),
     "INCLUDE_FORKS": ("Include forks", "false"),
     "SCAN_INTERVAL_MINUTES": ("Full scan every (minutes)", "10"),
+    "SCAN_THREADS": ("Repos scanned at once", "4"),
     "STALE_DAYS": ("Branches are stale after (days)", "30"),
     "NEVER_FLAG": ("Never flag branches matching", "main,master,develop,release/*,hotfix/*,gh-pages"),
     "WORK_DAYS": ("Working days", "mon,tue,wed,thu,fri"),

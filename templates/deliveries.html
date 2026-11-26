@@ -63,7 +63,7 @@
     <div class="panel-head"><h2 id="scan-h">Scans</h2><span class="hint">last 30</span></div>
     {% if scans %}
     <div class="scroll"><table style="min-width: 720px">
-      <thead><tr><th>Started</th><th>Trigger</th><th style="text-align: right" title="Repos read in full, and how many were unchanged and skipped">Repos (unchanged)</th><th style="text-align: right">Open PRs</th><th style="text-align: right">Branches</th><th style="text-align: right">Events</th><th style="text-align: right">Requests</th><th>API left</th><th>Problems</th></tr></thead>
+      <thead><tr><th>Started</th><th>Trigger</th><th style="text-align: right" title="Repos read in full, and how many were unchanged and skipped">Repos (unchanged)</th><th style="text-align: right">Open PRs</th><th style="text-align: right">Branches</th><th style="text-align: right">Events</th><th style="text-align: right">Requests</th><th style="text-align: right" title="GitHub API points spent; one per request when GitHub doesn't report a query's cost">Points</th><th>API left</th><th>Problems</th></tr></thead>
       <tbody>{% for s in scans %}<tr>
         <td class="nowrap sub">{{ s.started_at.strftime('%d %b %H:%M:%S') }}{% if s.finished_at %} · {{ ((s.finished_at - s.started_at).total_seconds())|round(1) }} s{% else %} · running{% endif %}</td>
         <td class="nowrap sub">{{ s.trigger }}</td>
@@ -72,6 +72,7 @@
         <td class="sub" style="text-align: right">{{ s.branches }}</td>
         <td class="sub" style="text-align: right">{{ s.events }}</td>
         <td class="sub" style="text-align: right">{{ s.requests if s.requests is not none else '—' }}</td>
+        <td class="sub" style="text-align: right">{{ s.api_points if s.api_points is not none else '—' }}</td>
         <td class="nowrap mono sub" style="font-size: 13px">{{ s.rate_remaining if s.rate_remaining is not none else '—' }}</td>
         <td class="sub {{ 'tone-bad' if s.error }}">{{ s.error or '—' }}</td>
       </tr>{% endfor %}</tbody>

@@ -298,6 +298,8 @@ ALTER TABLE repos ADD COLUMN IF NOT EXISTS scan_sig TEXT;
 ALTER TABLE repos ADD COLUMN IF NOT EXISTS full_scan_at TIMESTAMPTZ;
 ALTER TABLE scan_log ADD COLUMN IF NOT EXISTS skipped INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE scan_log ADD COLUMN IF NOT EXISTS requests INTEGER;
+ALTER TABLE scan_log ADD COLUMN IF NOT EXISTS elapsed_seconds DOUBLE PRECISION;  -- wall time of the scan
+ALTER TABLE scan_log ADD COLUMN IF NOT EXISTS api_points INTEGER;                -- GitHub points spent
 
 -- Repo health (see repohealth.py): settings behind branch and review problems.
 ALTER TABLE repos ADD COLUMN IF NOT EXISTS delete_branch_on_merge BOOLEAN;
