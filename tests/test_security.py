@@ -88,6 +88,21 @@ def test_channel_urls_must_be_https_and_the_right_service():
     assert actions.channel_url_problem("teams", "https://169.254.169.254/latest")
 
 
+@pytest.mark.parametrize("url, accepted", [
+    ("https://hooks.slack.com/services/T/B/x", True),
+    ("https://SLACK.COM/services/x", True),
+    ("https://hooks.slack.com:443/services/x", True),
+    ("https://evilslack.com/services/x", False),
+    ("https://my-slack.com/services/x", False),
+    ("https://hooks.my-slack.com/services/x", False),
+    ("https://slack.com.evil.test/services/x", False),
+])
+def test_slack_webhook_host_must_be_slack_com(url, accepted):
+    import actions
+    problem = actions.channel_url_problem("slack", url)
+    assert (problem is None) is accepted
+
+
 def test_safe_next():
     import admin
     assert admin._safe_next("//evil.com") == "/"
