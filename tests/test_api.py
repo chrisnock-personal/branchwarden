@@ -189,6 +189,31 @@ def test_personal_tokens_over_the_api(env):
     assert call(env, "DELETE", f"/tokens/{t['id']}", "viewer").status_code == 200
 
 
+# A bool is an int in Python: JSON true would silently mean one day, false would mean never.
+BAD_EXPIRY = [True, False, 0, -1, apitokens.MAX_DAYS + 1, 1.5, "30"]
+TOKEN_PATHS = [("/tokens", {"name": "laptop", "scope": "read"}),
+               ("/admin/service-tokens", {"name": "ci", "scope": "read", "role": "viewer"})]
+
+
+@pytest.mark.parametrize("path,body", TOKEN_PATHS)
+@pytest.mark.parametrize("expires_days", BAD_EXPIRY)
+def test_token_expiry_rejects_bools_and_other_non_integers(env, path, body, expires_days):
+    resp = call(env, "POST", path, json={**body, "expires_days": expires_days})
+    assert resp.status_code == 400
+    assert resp.get_json()["error"]["code"] == "bad_request"
+    assert "Expiry" in resp.get_json()["error"]["message"]
+    assert "token" not in resp.get_json()
+
+
+@pytest.mark.parametrize("path,body", TOKEN_PATHS)
+@pytest.mark.parametrize("expires_days", [1, apitokens.MAX_DAYS])
+def test_token_expiry_accepts_whole_days(env, path, body, expires_days):
+    resp = call(env, "POST", path, json={**body, "expires_days": expires_days})
+    assert resp.status_code == 201
+    assert resp.get_json()["expires_at"] is not None
+    assert call(env, "GET", "/me", token=resp.get_json()["token"]).status_code == 200
+
+
 def test_refusals(env, monkeypatch):
     c = env["client"]
     assert c.get("/api/v1/me", base_url="https://localhost").status_code == 401
