@@ -189,6 +189,31 @@ def test_personal_tokens_over_the_api(env):
     assert call(env, "DELETE", f"/tokens/{t['id']}", "viewer").status_code == 200
 
 
+def test_morning_setup_needs_verified_ownership_of_the_login(env):
+    """A viewer types someone else's login on My work, then tries to claim their morning message over the API."""
+    webhook = "https://prod-12.westeurope.logic.azure.com/workflows/attacker/triggers/manual/paths/invoke?sig=x"
+    with db.get_conn() as conn:
+        attacker = settings.create_user(conn, "intruder@example.com", "Intruder", "viewer", "test",
+                                        password="a-long-test-password").user_id
+        settings.set_my_login(conn, attacker, "dana")                # a demo login nobody has claimed yet
+        _, token = apitokens.create(conn, "intruder", "write", "test", user_id=attacker)
+    body = {"enabled": True, "to": "teams", "teams_url": webhook}
+    r = call(env, "PUT", "/my-work/morning", token=token, json=body)
+    assert r.status_code == 409 and "Sign in with GitHub" in r.get_json()["error"]["message"]
+    with db.get_conn() as conn:
+        row = db.one(conn, "SELECT morning, morning_user FROM people WHERE login = 'dana'")
+        assert not row["morning"] and row["morning_user"] is None
+        assert settings.morning_teams_key("dana") not in settings.load(conn)   # no attacker webhook stored
+    # First-time setup works for the account that signs in with GitHub as that login.
+    with db.get_conn() as conn:
+        real = settings.github_user(conn, {"id": 9876, "login": "dana", "name": "Dana Reyes"}, "member",
+                                    "9876+dana@users.noreply.github.com")
+        _, real_token = apitokens.create(conn, "dana", "write", "test", user_id=real)
+    assert call(env, "PUT", "/my-work/morning", token=real_token, json=body).status_code == 200
+    with db.get_conn() as conn:
+        assert db.one(conn, "SELECT morning_user FROM people WHERE login = 'dana'")["morning_user"] == real
+
+
 def test_refusals(env, monkeypatch):
     c = env["client"]
     assert c.get("/api/v1/me", base_url="https://localhost").status_code == 401
