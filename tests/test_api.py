@@ -298,3 +298,26 @@ def test_bad_tokens_are_throttled_per_address(env, monkeypatch):
     assert call(env, "GET", "/me", "viewer").status_code == 429          # the address waits a minute, whatever the token
     api._failed.clear()
     assert call(env, "GET", "/me", "viewer").status_code == 200
+
+
+def test_morning_test_respects_ownership(env, monkeypatch):
+    """A local account that typed the victim's login can't send their morning message via the API."""
+    import notify
+    sent = []
+    monkeypatch.setattr(notify, "slack_api_post", lambda token, payload: sent.append(payload))
+    with db.get_conn() as conn:
+        owner = settings.github_user(conn, {"id": 555001, "login": "dana", "name": "Dana Reyes"}, "member",
+                                     "dana-gh@example.com")
+        db.execute(conn, """UPDATE people SET slack_id = 'U01DANA001', morning = TRUE, morning_to = 'slack',
+                            morning_user = %s WHERE login = 'dana'""", (owner,))
+        settings.save(conn, {"DEMO_MODE": None, "SLACK_DM_TOKEN": "xoxb-test",
+                             "WORK_DAYS": "mon,tue,wed,thu,fri,sat,sun"}, "test")
+        owner_token = apitokens.create(conn, "owner token", "write", "test", user_id=owner)[1]
+    # env's member token belongs to a password account that has typed "dana" on My work.
+    refused = call(env, "POST", "/my-work/morning/test", "member")
+    assert refused.status_code == 403
+    assert "Another account set up" in refused.get_json()["error"]["message"]
+    assert not sent
+    allowed = call(env, "POST", "/my-work/morning/test", token=owner_token)
+    assert allowed.status_code == 200 and allowed.get_json()["ok"]
+    assert len(sent) == 1 and sent[0]["channel"] == "U01DANA001"

@@ -560,7 +560,7 @@ def my_morning_test():
     if g.api["service"] or not login:
         return error(409, "no_github_login", "This needs a person's token, with their GitHub login set.")
     with db.get_conn() as conn:
-        return result(actions.morning_now(conn, settings.load(conn), login))
+        return result(actions.morning_now(conn, settings.load(conn), login, user_id=g.api.get("user_id")))
 
 
 @endpoint("GET", "/metrics", "read", "Review and merge times, merges per week, by repo and by size", "metrics",
@@ -978,6 +978,14 @@ def openapi_json():
 
 # ─── The reference page (docs/api.md), from the same declarations ───────────
 
+# A paragraph under a section of the reference page, after its table.
+TAG_NOTES = {
+    "me": "Both morning-message endpoints check ownership: only the account that set up a login's message, or a\n"
+          "GitHub sign-in as that login, can change or send it (403). Setting one up for the first time needs that\n"
+          "GitHub sign-in (409): a login typed on My work isn't proof that it's yours.",
+}
+
+
 def markdown() -> str:
     """docs/api.md: every endpoint, who may call it, and what it takes. `python api.py --markdown > docs/api.md`."""
     who = {"read": "viewer", "act": "member", "admin": "admin", "self": "anyone (not read-only)"}
@@ -1010,6 +1018,8 @@ def markdown() -> str:
                                   " (" + "; ".join(x for x in extra if not x.endswith(": ")) + ")")
             out.append(f"| {e.method} | `{e.path}` | {who[e.need]} | {detail} |")
         out.append("")
+        if tag in TAG_NOTES:
+            out += [TAG_NOTES[tag], ""]
     out += ["## Examples", "",
             "```bash",
             "TOKEN=bwt_…   # your menu › API tokens",

@@ -545,7 +545,7 @@ def my_morning():
                                 to=request.form.get("to") or None, teams_url=request.form.get("teams_url"),
                                 remove_teams=bool(request.form.get("remove_teams")), user_id=g.user["id"])
         if action == "test" and r.ok:
-            r = actions.morning_now(conn, settings.load(conn), login)
+            r = actions.morning_now(conn, settings.load(conn), login, user_id=g.user["id"])
     flash(r.message, r.tone)
     return redirect(url_for("my_work") + "#morning")
 

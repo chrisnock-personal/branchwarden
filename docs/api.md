@@ -67,6 +67,10 @@ The same, machine-readable: `GET /api/v1/openapi.json`.
 | PUT | `/my-work/morning` | anyone (not read-only) | Turn the token owner's morning message on or off, and say where it goes (body: `enabled`, `to`, `teams_url`, `remove_teams`) |
 | POST | `/my-work/morning/test` | anyone (not read-only) | Send the token owner's morning message now |
 
+Both morning-message endpoints check ownership: only the account that set up a login's message, or a
+GitHub sign-in as that login, can change or send it (403). Setting one up for the first time needs that
+GitHub sign-in (409): a login typed on My work isn't proof that it's yours.
+
 ## Metrics
 
 | | Path | Who | What |
