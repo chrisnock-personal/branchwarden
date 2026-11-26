@@ -41,6 +41,12 @@
         <div class="link-box"><code id="conn-login">branchwarden login --url {{ connect.url }}{% if connect.fingerprint %} --fingerprint {{ connect.fingerprint|replace(':', '') }}{% endif %}</code><button type="button" class="btn" data-copy="conn-login">Copy</button></div></li>
       <li><span>Add it to Claude Code (or see the <a href="https://github.com/chrisnock-personal/branchwarden/blob/main/cli/README.md" rel="noopener">CLI's README</a> for Claude Desktop):</span>
         <div class="link-box"><code id="conn-claude">claude mcp add branchwarden -- branchwarden mcp</code><button type="button" class="btn" data-copy="conn-claude">Copy</button></div></li>
+      {% if connect.mcp_url %}
+      <li><span>On another machine, use the optional HTTP service instead (once it's published):</span>
+        <div class="link-box"><code id="conn-mcp-http">claude mcp add --transport http branchwarden {{ connect.mcp_url }} --header "Authorization: Bearer bwt_…"</code><button type="button" class="btn" data-copy="conn-mcp-http">Copy</button></div>
+        {% if connect.fingerprint %}<p class="hint">With this install's self-signed certificate, the agent's machine has to trust it too. For Claude Code, set <span class="mono">NODE_EXTRA_CA_CERTS</span> to the certificate shown under <em>Settings › TLS</em>.</p>{% endif %}
+      </li>
+      {% endif %}
     </ol>
     <p class="hint">Then try <span class="mono">branchwarden me</span>, or ask your agent what's waiting on you. For scripts and CI, set <span class="mono">BRANCHWARDEN_URL={{ connect.url }}</span> and <span class="mono">BRANCHWARDEN_TOKEN</span>{% if connect.fingerprint %}, and <span class="mono">BRANCHWARDEN_FINGERPRINT</span> as above{% endif %} instead of signing in.
       Give an agent a <b>read-only</b> token unless it has to change things; even then, it asks before requesting reviewers on GitHub.</p>

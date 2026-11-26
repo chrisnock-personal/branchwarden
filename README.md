@@ -391,6 +391,10 @@ podman-compose --profile mcp up -d
   Branchwarden, and gets what that token allows.
 - **Host names:** set `MCP_ALLOWED_HOSTS` (comma-separated `name:port`) to
   answer only requests addressed to those names.
+- **Address for agents:** set `MCP_PUBLIC_URL` in `.env` to the full address
+  agents reach, e.g. `https://branchwarden.example.com:8765/mcp`. The *API
+  tokens* page then shows the HTTP command for that address. The dashboard
+  can't detect the service, so this is an option to use, not a health check.
 - **Behind a reverse proxy** (`BRANCHWARDEN_TLS=off`): it follows the
   dashboard and speaks plain HTTP on 8765, for the proxy to put HTTPS in front
   of it. Publish it to the proxy only, e.g. `MCP_EXPOSE=127.0.0.1:8765`. With
@@ -588,6 +592,8 @@ other loses access to it.
 | `BRANCHWARDEN_VERSION` | `latest` | the published image to run, e.g. `0.2` |
 | `DASHBOARD_EXPOSE` | `8443` | where compose publishes HTTPS, e.g. `127.0.0.1:8443` |
 | `TLS_HOSTNAMES` | | extra names/IPs for the self-signed certificate |
+| `MCP_EXPOSE`, `MCP_ALLOWED_HOSTS` | `8765`, any name | the optional HTTP MCP service |
+| `MCP_PUBLIC_URL` | | its full address (`https://…:8765/mcp`), to show the HTTP command on the API tokens page |
 | `BRANCHWARDEN_TLS` | `on` | `off` only behind a TLS proxy (with `BRANCHWARDEN_BEHIND_PROXY=true`) |
 | `GITHUB_TARGETS`, `GITHUB_TOKEN`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_FILE`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_API_URL`, `PUBLIC_URL` | | imported on the first start only, then edited in the dashboard |
 
