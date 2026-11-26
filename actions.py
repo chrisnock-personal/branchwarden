@@ -345,8 +345,8 @@ def channel_url_problem(kind: str, url: str) -> Optional[str]:
     parts = urlsplit(url)
     if parts.scheme != "https" or not parts.netloc:
         return "The webhook URL must start with https://"
-    host = parts.hostname or ""
-    if kind == "slack" and not host.endswith("slack.com"):
+    host = (parts.hostname or "").lower()
+    if kind == "slack" and not (host == "slack.com" or host.endswith(".slack.com")):
         return "A Slack incoming webhook URL starts with https://hooks.slack.com/"
     if kind == "teams" and not (host.endswith(".logic.azure.com") or host.endswith(".powerplatform.com")
                                 or host.endswith(".office.com") or host.endswith(".microsoft.com")):
@@ -702,19 +702,24 @@ def morning_teams_problem(url: str) -> Optional[str]:
 
 
 def morning_owner_problem(conn, login: str, user_id: Optional[int]) -> Optional[Result]:
-    """Refuse when another account owns this login's morning message and the caller hasn't proved it's theirs.
-    Used for both changing the message and sending one now: typing a login on My work isn't ownership."""
+    """Refuse unless the account asking owns this login's morning message or has proved the login is its own
+    (GitHub sign-in as that login). Used for both changing the message and sending one now: typing a login on
+    My work isn't ownership, whether or not anyone has claimed the message yet. No account (an admin or a
+    configured recipient) isn't checked."""
     if user_id is None:
         return None
     owner = db.one(conn, """SELECT u.id FROM people p JOIN users u ON u.id = p.morning_user
                              WHERE p.login = %s AND LOWER(u.github_login) = p.login""", (login,))
-    if not owner or owner["id"] == user_id:
+    if owner and owner["id"] == user_id:
         return None
     me = settings.user(conn, user_id)
     if me and me["via_github"] and (me["github_login"] or "").lower() == login:
         return None
-    return refused(f"Another account set up the morning message for {login}, so only it can change or send it. "
-                   "Signing in with GitHub as that login lets you take it over.", 403)
+    if owner:
+        return refused(f"Another account set up the morning message for {login}, so only it can change or send it. "
+                       "Signing in with GitHub as that login lets you take it over.", 403)
+    return refused(f"Sign in with GitHub as {login} to set up its morning message. A login typed on "
+                   "My work isn't proof that it's yours.", 409)
 
 
 def set_morning(conn, login: str, enabled: Optional[bool], actor: str, to: Optional[str] = None,
@@ -723,8 +728,10 @@ def set_morning(conn, login: str, enabled: Optional[bool], actor: str, to: Optio
     """Turn a person's morning message on or off, and say where it goes: Slack (a DM from the bot, which
     needs their Slack member ID) or Teams (their own Workflows webhook, given here and stored encrypted).
 
-    user_id is the account doing it, which then owns it: another account that has typed the same login
-    on My work can't change it, unless it signs in with GitHub as that login (which proves it's theirs)."""
+    user_id is the account doing it, which then owns it. Typing a login on My work isn't proof it's yours:
+    first-time setup needs GitHub sign-in as that login (or no account, for an admin/configured recipient).
+    Another account that has typed the same login can't change a claimed message either, unless it signs in
+    with GitHub as that login (which proves it's theirs)."""
     login = (login or "").lower()
     if not login:
         return refused("Give your GitHub login on My work first.", 409)

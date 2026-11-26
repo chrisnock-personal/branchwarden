@@ -216,6 +216,47 @@ def test_sending_now_checks_the_owner(slack):
         assert len(sent) == 2
 
 
+def test_sending_now_for_an_unclaimed_login_needs_github(slack):
+    """Nobody owns it yet: a typed login can't send someone's message now either."""
+    import actions
+    import db
+    import settings
+    sent, answer = slack
+    with db.get_conn() as conn:
+        settings.save(conn, {"DEMO_MODE": None}, "test")
+        db.execute(conn, "UPDATE people SET morning_user = NULL WHERE login = 'dana'")
+        uid = settings.create_user(conn, "typed@example.com", "Typed", "member", "test",
+                                   password="a-long-test-password").user_id
+        settings.set_my_login(conn, uid, "dana")
+        r = actions.morning_now(conn, settings.load(conn), "dana", user_id=uid)
+        assert not r.ok and r.status == 409 and "Sign in with GitHub" in r.message
+        assert not sent
+
+
+def test_unclaimed_login_cannot_be_taken_by_a_typed_login(db_url):
+    """Nobody owns it yet: a GitHub login typed on My work isn't enough to claim someone's morning message."""
+    import actions
+    import db
+    import settings
+    with db.get_conn() as conn:
+        db.execute(conn, "INSERT INTO people (login, name) VALUES ('victim', 'Victim')")
+        attacker = settings.create_user(conn, "attacker@example.com", "Attacker", "member", "test",
+                                        password="a-long-test-password").user_id
+        settings.set_my_login(conn, attacker, "victim")                  # typed, not verified
+        r = actions.set_morning(conn, "victim", True, "Attacker", to="teams", teams_url=TEAMS_URL, user_id=attacker)
+        assert not r.ok and r.status == 409 and "Sign in with GitHub" in r.message
+        row = db.one(conn, "SELECT morning, morning_to, morning_user FROM people WHERE login = 'victim'")
+        assert not row["morning"] and row["morning_user"] is None
+        assert settings.morning_teams_key("victim") not in settings.load(conn)   # no attacker webhook stored
+        # First-time setup works for the account that signs in with GitHub as that login.
+        real = settings.create_user(conn, "victim@example.com", "Victim", "member", "test",
+                                    password="a-long-test-password").user_id
+        settings.set_my_login(conn, real, "victim")
+        db.execute(conn, "UPDATE users SET github_id = %s WHERE id = %s", (900123, real))
+        assert actions.set_morning(conn, "victim", True, "Victim", to="teams", teams_url=TEAMS_URL, user_id=real).ok
+        assert db.one(conn, "SELECT morning_user FROM people WHERE login = 'victim'")["morning_user"] == real
+
+
 def test_opt_ins_from_before_keep_going_after_upgrading(db_url):
     """Opted in before accounts owned the message: on upgrade, it's linked to the account with that login."""
     import db

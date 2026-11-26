@@ -42,7 +42,9 @@ def create(conn, name: str, scope: str, actor: str, *, user_id: Optional[int] = 
         return None, "The scope is read or write."
     if (user_id is None) == (role is None) or (role is not None and role not in settings.ROLES):
         return None, "A token is either a person's (no role) or a service token with a role."
-    if expires_days is not None and not (isinstance(expires_days, int) and 1 <= expires_days <= MAX_DAYS):
+    # bool is an int subclass in Python: a JSON true would mean one day, false would mean never.
+    if expires_days is not None and (isinstance(expires_days, bool) or not isinstance(expires_days, int)
+                                     or not 1 <= expires_days <= MAX_DAYS):
         return None, f"Expiry is a number of days from 1 to {MAX_DAYS}, or none."
     token = PREFIX + secrets.token_urlsafe(32)
     expires = datetime.now(timezone.utc) + timedelta(days=expires_days) if expires_days else None
