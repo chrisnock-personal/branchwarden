@@ -701,6 +701,22 @@ def morning_teams_problem(url: str) -> Optional[str]:
     return None
 
 
+def morning_owner_problem(conn, login: str, user_id: Optional[int]) -> Optional[Result]:
+    """Refuse when another account owns this login's morning message and the caller hasn't proved it's theirs.
+    Used for both changing the message and sending one now: typing a login on My work isn't ownership."""
+    if user_id is None:
+        return None
+    owner = db.one(conn, """SELECT u.id FROM people p JOIN users u ON u.id = p.morning_user
+                             WHERE p.login = %s AND LOWER(u.github_login) = p.login""", (login,))
+    if not owner or owner["id"] == user_id:
+        return None
+    me = settings.user(conn, user_id)
+    if me and me["via_github"] and (me["github_login"] or "").lower() == login:
+        return None
+    return refused(f"Another account set up the morning message for {login}, so only it can change or send it. "
+                   "Signing in with GitHub as that login lets you take it over.", 403)
+
+
 def set_morning(conn, login: str, enabled: Optional[bool], actor: str, to: Optional[str] = None,
                 teams_url: Optional[str] = None, remove_teams: bool = False,
                 user_id: Optional[int] = None) -> Result:
@@ -712,13 +728,9 @@ def set_morning(conn, login: str, enabled: Optional[bool], actor: str, to: Optio
     login = (login or "").lower()
     if not login:
         return refused("Give your GitHub login on My work first.", 409)
-    owner = db.one(conn, """SELECT u.id FROM people p JOIN users u ON u.id = p.morning_user
-                             WHERE p.login = %s AND LOWER(u.github_login) = p.login""", (login,))
-    if owner and user_id is not None and owner["id"] != user_id:
-        me = settings.user(conn, user_id)
-        if not (me and me["via_github"] and (me["github_login"] or "").lower() == login):
-            return refused(f"Another account set up the morning message for {login}, so only it can change it. "
-                           "Signing in with GitHub as that login lets you take it over.", 403)
+    problem = morning_owner_problem(conn, login, user_id)
+    if problem:
+        return problem
     if to is not None and to not in ("slack", "teams"):
         return refused("Send it to slack or teams.")
     teams_url = (teams_url or "").strip()
@@ -750,8 +762,14 @@ def set_morning(conn, login: str, enabled: Optional[bool], actor: str, to: Optio
                 if enabled else "No more morning messages.", enabled=enabled, to=to)
 
 
-def morning_now(conn, values: dict, login: str) -> Result:
-    p = db.one(conn, "SELECT * FROM people WHERE login = %s", ((login or "").lower(),))
+def morning_now(conn, values: dict, login: str, user_id: Optional[int] = None) -> Result:
+    """Send one morning message now. user_id is the account asking: the message's owner (or a GitHub
+    sign-in as that login) only, so another account typing the same login can't send it on demand."""
+    login = (login or "").lower()
+    problem = morning_owner_problem(conn, login, user_id)
+    if problem:
+        return problem
+    p = db.one(conn, "SELECT * FROM people WHERE login = %s", (login,))
     if not p:
         return refused("Choose where it goes first: your Slack member ID (ask an admin, under Settings › People) "
                        "or your Teams webhook.", 409)

@@ -560,7 +560,7 @@ def my_morning_test():
     if g.api["service"] or not login:
         return error(409, "no_github_login", "This needs a person's token, with their GitHub login set.")
     with db.get_conn() as conn:
-        return result(actions.morning_now(conn, settings.load(conn), login))
+        return result(actions.morning_now(conn, settings.load(conn), login, user_id=g.api.get("user_id")))
 
 
 @endpoint("GET", "/metrics", "read", "Review and merge times, merges per week, by repo and by size", "metrics",

@@ -195,6 +195,27 @@ def test_only_the_account_that_set_it_up(db_url, monkeypatch):
         assert len(posted) == 1
 
 
+def test_sending_now_checks_the_owner(slack):
+    """“Send me one now” needs the same ownership as changing the message: the login alone isn't enough."""
+    import actions
+    import db
+    import settings
+    sent, answer = slack
+    with db.get_conn() as conn:
+        settings.save(conn, {"DEMO_MODE": None}, "test")
+        values = settings.load(conn)
+        owner = db.one(conn, "SELECT id FROM users WHERE github_login = 'dana'")["id"]
+        impostor = _account(conn, "dana")                         # typed the login on My work
+        r = actions.morning_now(conn, values, "dana", user_id=impostor)
+        assert not r.ok and r.status == 403
+        assert not sent
+        assert actions.morning_now(conn, values, "dana", user_id=owner).ok
+        assert len(sent) == 1 and sent[0][1]["channel"] == "U01DANA001"
+        verified = _account(conn, "dana", github=True)            # signing in with GitHub as dana proves it
+        assert actions.morning_now(conn, values, "dana", user_id=verified).ok
+        assert len(sent) == 2
+
+
 def test_opt_ins_from_before_keep_going_after_upgrading(db_url):
     """Opted in before accounts owned the message: on upgrade, it's linked to the account with that login."""
     import db
