@@ -276,6 +276,19 @@ def _client(conn):
     return c, csrf, dashboard.app
 
 
+def test_worker_stale_banner_reaches_every_page(db_url, monkeypatch):
+    import dashboard
+    with db.get_conn() as conn:
+        c, _, _ = _client(conn)
+    overdue = {"since": NOW - timedelta(minutes=25), "interval": 10}
+    monkeypatch.setattr(dashboard, "_worker_overdue", lambda: overdue)
+    for path in ("/", "/pulls", "/branches", "/me"):
+        body = c.get(path, base_url="https://localhost").get_data(as_text=True)
+        assert "Scans have stopped." in body and "every 10 minutes" in body, path
+    monkeypatch.setattr(dashboard, "_worker_overdue", lambda: None)
+    assert "Scans have stopped." not in c.get("/", base_url="https://localhost").get_data(as_text=True)
+
+
 def test_every_page_renders_with_demo_data(db_url):
     with db.get_conn() as conn:
         demo.load(conn, settings.load(conn))

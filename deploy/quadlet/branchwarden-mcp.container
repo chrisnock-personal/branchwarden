@@ -10,11 +10,15 @@ Entrypoint=python
 Exec=-u mcp_service.py
 Network=branchwarden.network
 PublishPort=8765:8765
+# Settings for this service only. Unlike the other containers, it doesn't get the
+# whole .env: the database password and the app's secret key stay out of it.
+# Copy branchwarden-mcp.env.example to ~/.config/branchwarden/branchwarden-mcp.env
+# and set BRANCHWARDEN_TLS / DASHBOARD_PORT there to match the dashboard (and
+# behind a reverse proxy, MCP_ALLOWED_HOSTS). The file must exist: copy it even
+# if you leave every setting commented out.
+EnvironmentFile=%h/.config/branchwarden/branchwarden-mcp.env
 # The dashboard as this container reaches it on the network; its certificate is pinned from the volume.
 Environment=MCP_DASHBOARD_HOST=branchwarden-dashboard
-# Behind a reverse proxy doing HTTPS, as the dashboard (plain HTTP both ways, for the proxy to front):
-# Environment=BRANCHWARDEN_TLS=off
-# Environment=MCP_ALLOWED_HOSTS=branchwarden.example.com:8765
 Volume=branchwarden-certs.volume:/certs:ro,z
 HealthCmd=python healthcheck.py mcp
 HealthInterval=30s

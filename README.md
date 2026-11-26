@@ -575,8 +575,14 @@ They start at boot (`WantedBy=default.target`). The dashboard is published on
 8443; change `PublishPort` in `branchwarden-dashboard.container` for another
 port. Uncomment `AutoUpdate=registry` to let `podman auto-update` install new
 releases of the image tag. `branchwarden-mcp.container` is the optional MCP
-service, on 8765. Copy it as well and run `systemctl --user start
-branchwarden-mcp` to use it.
+service, on 8765. Copy it as well, along with
+`deploy/quadlet/branchwarden-mcp.env.example` as
+`~/.config/branchwarden/branchwarden-mcp.env`, and run `systemctl --user start
+branchwarden-mcp` to use it. Its settings are kept out of the main `.env` (no
+database password or app secret key reaches it): set `BRANCHWARDEN_TLS`,
+`DASHBOARD_PORT`, `MCP_ALLOWED_HOSTS` or `MCP_PORT` in that file. The first two
+must match the dashboard's settings; `MCP_EXPOSE` from `.env` has no effect on
+quadlets, so change `PublishPort` in the `.container` file instead.
 
 Volumes shared by two containers are mounted with `:z`, not `:Z`. On a host
 with SELinux enforcing, `:Z` makes a volume private to one container, and the
