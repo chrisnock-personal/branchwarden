@@ -707,18 +707,23 @@ def set_morning(conn, login: str, enabled: Optional[bool], actor: str, to: Optio
     """Turn a person's morning message on or off, and say where it goes: Slack (a DM from the bot, which
     needs their Slack member ID) or Teams (their own Workflows webhook, given here and stored encrypted).
 
-    user_id is the account doing it, which then owns it: another account that has typed the same login
-    on My work can't change it, unless it signs in with GitHub as that login (which proves it's theirs)."""
+    user_id is the account doing it, which then owns it. Typing a login on My work isn't proof it's yours:
+    first-time setup needs GitHub sign-in as that login (or no account, for an admin/configured recipient).
+    Another account that has typed the same login can't change a claimed message either, unless it signs in
+    with GitHub as that login (which proves it's theirs)."""
     login = (login or "").lower()
     if not login:
         return refused("Give your GitHub login on My work first.", 409)
     owner = db.one(conn, """SELECT u.id FROM people p JOIN users u ON u.id = p.morning_user
                              WHERE p.login = %s AND LOWER(u.github_login) = p.login""", (login,))
-    if owner and user_id is not None and owner["id"] != user_id:
-        me = settings.user(conn, user_id)
-        if not (me and me["via_github"] and (me["github_login"] or "").lower() == login):
+    me = settings.user(conn, user_id) if user_id is not None else None
+    via_github = bool(me and me["via_github"] and (me["github_login"] or "").lower() == login)
+    if user_id is not None and not via_github and not (owner and owner["id"] == user_id):
+        if owner:
             return refused(f"Another account set up the morning message for {login}, so only it can change it. "
                            "Signing in with GitHub as that login lets you take it over.", 403)
+        return refused(f"Sign in with GitHub as {login} to set up its morning message. A login typed on "
+                       "My work isn't proof that it's yours.", 409)
     if to is not None and to not in ("slack", "teams"):
         return refused("Send it to slack or teams.")
     teams_url = (teams_url or "").strip()
