@@ -21,7 +21,7 @@ import os
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 from dotenv import load_dotenv
 from flask import Flask, Response, abort, flash, g, redirect, render_template, request, url_for
@@ -562,8 +562,14 @@ def my_login():
 
 def connect_info(values: dict) -> dict:
     """What the CLI and an MCP client need to reach this Branchwarden: its address, and while
-    its certificate is self-signed, the fingerprint to pin (otherwise the system trusts it)."""
+    its certificate is self-signed, the fingerprint to pin (otherwise the system trusts it).
+    `MCP_PUBLIC_URL` is the published address of the optional HTTP service; the dashboard
+    can't see that service, so it's an option to show, not a claim that it's running."""
     url = (settings.get(values, "PUBLIC_URL") or request.url_root).rstrip("/")
+    mcp_url = os.getenv("MCP_PUBLIC_URL", "").strip().rstrip("/")
+    parsed = urlparse(mcp_url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        mcp_url = ""          # an unset or malformed address mustn't render a command
     fingerprint = None
     if tls.enabled():
         try:
@@ -571,7 +577,7 @@ def connect_info(values: dict) -> dict:
             fingerprint = info["fingerprint"] if info["self_signed"] else None
         except (OSError, ValueError):
             fingerprint = None
-    return {"url": url, "fingerprint": fingerprint}
+    return {"url": url, "fingerprint": fingerprint, "mcp_url": mcp_url}
 
 
 @app.get("/me/tokens")
