@@ -11,7 +11,7 @@ there, so adding an organisation doesn't flood the channels.
 from __future__ import annotations
 
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -27,10 +27,11 @@ from github import Client, Connections, GitHubError
 
 log = logging.getLogger("branchwarden.scanner")
 
-SCAN_THREADS = 4                       # repos scanned at once: well inside GitHub's secondary limits
+SCAN_THREADS = 4                       # default repos scanned at once: well inside GitHub's secondary limits
+MAX_SCAN_THREADS = 8                   # the setting is clamped to this, even if someone types a bigger number
 REFRESH = timedelta(minutes=60)        # every repo is read in full at least this often (CI states, reviews)
 
-RATE = "rateLimit { remaining limit resetAt }"
+RATE = "rateLimit { cost remaining limit resetAt }"
 
 REPO_FIELDS = """
   pageInfo { hasNextPage endCursor }
@@ -479,11 +480,53 @@ def signature(node: dict) -> Optional[str]:
     return f"{node.get('pushedAt')}|{prs.get('totalCount')}|{newest}"
 
 
+def _open_pr_count(sig: str) -> Optional[int]:
+    """The open-PR count in a signature, or None if it isn't one we made."""
+    parts = sig.split("|", 2)
+    if len(parts) != 3:
+        return None
+    try:
+        return int(parts[1])
+    except (TypeError, ValueError):
+        return None
+
+
 def unchanged(repo: dict, sig: Optional[str], now: datetime) -> bool:
-    """Whether a full scan can skip this repo's PR and branch queries."""
+    """Whether a full scan can skip this repo's PR and branch queries.
+
+    Only a repo with no open PRs is skipped: a review, a comment, a check or a
+    label change need not move `pushedAt`, and an open PR's `updatedAt` isn't
+    always the newest one in the list. Reading open PRs every time costs more
+    than the risk of missing one of those events. The hourly REFRESH still
+    covers metadata changes without a push (branch protection, for instance).
+    """
     return bool(sig and repo.get("scan_sig") == sig and repo.get("scanned_once") and repo.get("history_at")
                 and not repo.get("last_error") and repo.get("full_scan_at")
-                and now - repo["full_scan_at"] < REFRESH)
+                and now - repo["full_scan_at"] < REFRESH
+                and _open_pr_count(sig) == 0)
+
+
+def scan_workers(values: Optional[dict]) -> int:
+    """Bounded pool size from the scanning settings (1 to 8 repos at once)."""
+    return max(1, min(MAX_SCAN_THREADS, settings.number(values or {}, "SCAN_THREADS", SCAN_THREADS)))
+
+
+def run_repos(todo: list[dict], worker, workers: int, progress=None) -> list[dict]:
+    """Run `worker(repo)` on a bounded pool, returning results in repo order.
+
+    Waiting in submission order rather than completion order keeps events in
+    the same order as a sequential scan, whatever the network does.
+    """
+    if not todo:
+        return []
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="scan") as pool:
+        futures = [pool.submit(worker, repo) for repo in todo]
+        out = []
+        for f in futures:
+            if progress:
+                progress()
+            out.append(f.result())
+    return out
 
 
 def _store_repo(conn, target: dict, node: dict, values: dict) -> dict:
@@ -547,6 +590,7 @@ class ScanResult:
         self.rate = None
         self.skipped = 0        # repos unchanged since their last full read
         self.requests = 0       # calls to GitHub
+        self.api_points = 0     # GraphQL points (and REST calls) spent on this scan
 
 
 def scan_target(conn, conns: Connections, target: dict, values: dict, result: ScanResult,
@@ -561,6 +605,7 @@ def scan_target(conn, conns: Connections, target: dict, values: dict, result: Sc
         conn.commit()
         return
     before = client.requests
+    before_points = getattr(client, "points", None)   # fakes only count calls
     try:
         if only is None:
             nodes = list_repos(client, target)
@@ -588,23 +633,24 @@ def scan_target(conn, conns: Connections, target: dict, values: dict, result: Sc
     todo = [r for r in repos if r["included"]]
     # Only a scheduled full scan skips: a webhook or reviewer change asked for these repos.
     skip = {r["id"] for r in todo if only is None and unchanged(r, r.get("new_sig"), now)}
-    with ThreadPoolExecutor(max_workers=SCAN_THREADS, thread_name_prefix="scan") as pool:
-        futures = [pool.submit(_scan_one, client, repo, values, repo["id"] in skip,
-                               repo["id"] in with_workflows or not repo.get("workflows_scanned"))
-                   for repo in todo]
-        for f in as_completed(futures):
-            if progress:
-                progress()
-            out = f.result()
-            if out["error"]:
-                result.errors.append(out["error"])
-                continue
-            result.events.extend(out["events"])
-            result.repos += 1
-            result.skipped += out["skipped"]
-            result.prs += out["prs"]
-            result.branches += out["branches"]
+    workers = scan_workers(values)
+    outs = run_repos(todo, lambda repo: _scan_one(
+        client, repo, values, repo["id"] in skip,
+        repo["id"] in with_workflows or not repo.get("workflows_scanned")), workers, progress)
+    for out in outs:
+        if out["error"]:
+            result.errors.append(out["error"])
+            continue
+        result.events.extend(out["events"])
+        result.repos += 1
+        result.skipped += out["skipped"]
+        result.prs += out["prs"]
+        result.branches += out["branches"]
     result.requests += client.requests - before
+    if before_points is not None:
+        result.api_points += max(0, client.points - before_points)
+    else:
+        result.api_points += client.requests - before    # lower bound: one call costs at least one point
     result.rate = client.rate
     if client.label == "token" and client.token_expires:
         settings.save(conn, {"GITHUB_TOKEN_EXPIRES": client.token_expires}, "Branchwarden", record=False)

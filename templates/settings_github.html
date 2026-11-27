@@ -137,6 +137,7 @@
       <div class="field"><label for="every">Full scan every</label>
         <select id="every" name="SCAN_INTERVAL_MINUTES">{% for v, label in intervals %}<option value="{{ v }}" {{ 'selected' if get('SCAN_INTERVAL_MINUTES') == v }}>{{ label }}</option>{% endfor %}</select>
         <span class="help">Webhooks keep PRs current in between.</span></div>
+      <div class="field"><label for="threads">Repos scanned at once</label><input class="input num" id="threads" name="SCAN_THREADS" value="{{ get('SCAN_THREADS') }}" inputmode="numeric"><span class="help">1 to 8 (4 by default). Lower this if GitHub asks you to slow down.</span></div>
       <div class="field" style="justify-content: flex-end">
         <label class="check"><input type="checkbox" name="INCLUDE_ARCHIVED" value="1" {{ 'checked' if flag('INCLUDE_ARCHIVED') }}> Include archived repositories</label>
         <label class="check"><input type="checkbox" name="INCLUDE_FORKS" value="1" {{ 'checked' if flag('INCLUDE_FORKS') }}> Include forks</label>

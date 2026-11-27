@@ -27,6 +27,7 @@ import data
 import db
 import notify
 import rules
+import scanner
 import settings
 import tls
 from github import Connections, GitHubError
@@ -283,6 +284,10 @@ def scan_settings(conn, form: Mapping, actor: str) -> Result:
     interval = get("SCAN_INTERVAL_MINUTES")
     if interval in dict(settings.SCAN_INTERVALS):
         changes["SCAN_INTERVAL_MINUTES"] = interval
+    threads = get("SCAN_THREADS")
+    if not threads.isdigit() or not 1 <= int(threads) <= scanner.MAX_SCAN_THREADS:
+        return refused(f"Repos scanned at once must be a number of repos, 1 to {scanner.MAX_SCAN_THREADS}.")
+    changes["SCAN_THREADS"] = threads
     for key in ("PUBLIC_URL", "GITHUB_API_URL"):
         if changes[key] and urlsplit(changes[key]).scheme != "https":
             return refused(f"{settings.label(key)} must start with https://")

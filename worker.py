@@ -62,6 +62,7 @@ def run_scan(conn, values: dict, trigger: str, only: set | None = None) -> scann
     """Scan every enabled account (or just the repos in `only`), log it, and
     queue messages for what happened."""
     result = scanner.ScanResult()
+    started = time.monotonic()
     if settings.flag(values, "DEMO_MODE"):
         db.execute(conn, """INSERT INTO scan_log (trigger, finished_at, error) VALUES (%s, NOW(), %s)""",
                    (trigger, "Demo data is loaded: GitHub isn't scanned until it's removed (python demo.py --remove)"))
@@ -88,18 +89,19 @@ def run_scan(conn, values: dict, trigger: str, only: set | None = None) -> scann
                 scanner.scan_target(conn, conns, t, values, result, only=mine, progress=healthcheck.beat)
     queued = rules.handle_events(conn, result.events, values) if result.events else 0
     rate = result.rate
+    elapsed = time.monotonic() - started
     db.execute(conn, """UPDATE scan_log SET finished_at = NOW(), repos = %s, prs = %s, branches = %s,
                                events = %s, skipped = %s, requests = %s, rate_remaining = %s, rate_limit = %s,
-                               error = %s WHERE id = %s""",
+                               elapsed_seconds = %s, api_points = %s, error = %s WHERE id = %s""",
                (result.repos, result.prs, result.branches, len(result.events), result.skipped, result.requests,
                 rate.remaining if rate else None, rate.limit if rate else None,
-                "; ".join(result.errors)[:2000] or None, log_id))
+                elapsed, result.api_points, "; ".join(result.errors)[:2000] or None, log_id))
     conn.commit()
     level = logging.WARNING if result.errors else logging.INFO
     log.log(level, "Scan (%s): %d repos (%d unchanged), %d open PRs, %d branches, %d events, %d messages queued, "
-            "%d GitHub requests%s",
+            "%d GitHub requests, %d API points in %.1fs%s",
             trigger, result.repos, result.skipped, result.prs, result.branches, len(result.events), queued,
-            result.requests,
+            result.requests, result.api_points, elapsed,
             f"; problems: {'; '.join(result.errors)}" if result.errors else "")
     return result
 

@@ -10,12 +10,14 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+import actions
 import db
 import demo
 import notify
 import rules
 import scanner
 import settings
+import worker
 import workflows
 from github import GitHubError, RateLimit
 
@@ -148,16 +150,38 @@ def test_scan_events_and_branch_bookkeeping(db_url):
 
 def test_unchanged_repo_is_skipped(db_url):
     gh = FakeGitHub()
-    gh.prs = [pr_node(1)]
     with db.get_conn() as conn:
         add_target(conn)
         scan(conn, gh)
         before = gh.requests
         again = scan(conn, gh)
-        assert again.skipped == 1 and again.prs == 1
+        assert again.skipped == 1 and again.prs == 0
         assert gh.requests - before == 1                   # only the repo list
-        gh.prs = [pr_node(1, updated=0.01)]                 # a review or comment on the PR
-        assert scan(conn, gh).skipped == 0
+        gh.prs = [pr_node(1)]                               # an open PR is always read in full
+        result = scan(conn, gh)
+        assert result.skipped == 0 and result.prs == 1
+        kinds = [e["kind"] for e in result.events]
+        assert kinds == ["opened"]                          # a review or check can't be missed
+
+
+def test_scan_threads_setting(db_url):
+    with db.get_conn() as conn:
+        assert not actions.scan_settings(conn, {"SCAN_THREADS": "9"}, "test").ok
+        assert not actions.scan_settings(conn, {"SCAN_THREADS": "junk"}, "test").ok
+        assert actions.scan_settings(conn, {"SCAN_THREADS": "2"}, "test").ok
+        assert settings.load(conn)["SCAN_THREADS"] == "2"
+
+
+def test_scan_log_records_timing_and_points(db_url, monkeypatch):
+    gh = FakeGitHub()
+    monkeypatch.setattr(worker, "Connections", lambda values: Conns(gh))
+    with db.get_conn() as conn:
+        add_target(conn)
+        result = worker.run_scan(conn, settings.load(conn), "manual")
+        row = db.one(conn, "SELECT * FROM scan_log ORDER BY id DESC LIMIT 1")
+        assert row["elapsed_seconds"] >= 0
+        assert row["api_points"] == result.api_points
+        assert row["api_points"] >= result.requests        # one point per call at least
 
 
 # ─── Messages: queued, sent, retried, failed ────────────────────────────────
